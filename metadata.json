@@ -1,0 +1,6 @@
+{
+  "name": "Enterprise Seating Management System",
+  "description": "An enterprise-grade seating management system with an interactive floor designer, automatic layout recognition, Excel bulk seat uploader, role-based controls, a mobile scanner companion, and a Power BI analytics suite.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "users": {
+      "title": "users",
+      "description": "User account management documents",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "department": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "email"]
+    },
+    "employees": {
+      "title": "employees",
+      "description": "Employee directory profile entries"
+    },
+    "buildings": {
+      "title": "buildings",
+      "description": "Building entities"
+    },
+    "floors": {
+      "title": "floors",
+      "description": "Floor layout entities"
+    },
+    "zones": {
+      "title": "zones",
+      "description": "Zone layout entities"
+    },
+    "seats": {
+      "title": "seats",
+      "description": "Seat allocation entities"
+    },
+    "requests": {
+      "title": "requests",
+      "description": "Seat requests"
+    },
+    "assets": {
+      "title": "assets",
+      "description": "IT hardware assets"
+    },
+    "checkInLogs": {
+      "title": "checkInLogs",
+      "description": "Check-in logs"
+    },
+    "auditLogs": {
+      "title": "auditLogs",
+      "description": "Audit logging"
+    },
+    "layoutObjects": {
+      "title": "layoutObjects",
+      "description": "Architectural and facility layout objects"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// ---------------------------------------------------------------------------
+// ROLLED BACK — see git history for the authenticated-rules attempt.
+//
+// The authenticated version of these rules (requiring request.auth != null)
+// broke the live site: this Firebase project's organization blocks Anonymous
+// Authentication (auth/admin-restricted-operation), so request.auth could
+// never become non-null, and every Firestore read/write was silently denied.
+// The app fell back to hardcoded seed data baked into the JS bundle for
+// every visitor, which is why logins and data went stale for everyone.
+//
+// This is back to fully open rules — the same posture the project was
+// already running under — to restore live sync immediately. The real fix
+// (Firebase App Check, which doesn't require an auth provider and so isn't
+// affected by the org's Anonymous Auth restriction) is the next step, not
+// yet applied here.
+// ---------------------------------------------------------------------------
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
