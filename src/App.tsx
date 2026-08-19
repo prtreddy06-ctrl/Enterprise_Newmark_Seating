@@ -736,34 +736,22 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // Enforce allowed tabs based on activeRole simulation / assigned role
+  // Enforce allowed tabs based on activeRole simulation / assigned role.
+  // This must stay in sync with getModuleAccess()/MODULE_DEFINITIONS below —
+  // previously it used its own separate, hardcoded access map that didn't
+  // know about newer tabs (like Master Configuration) or per-company module
+  // overrides, so navigating to those tabs would immediately get bounced
+  // back to the dashboard ("blinking").
   useEffect(() => {
     if (!currentUser) return;
-    const isSuper = activeRole === UserRole.SUPER_USER;
-    const isAdminRole = activeRole === UserRole.ADMIN;
-    const isIT = activeRole === UserRole.IT_ADMIN;
+    const isAccessible = MODULE_DEFINITIONS.some(m => m.id === activeTab)
+      ? getModuleAccess(activeTab) !== "hidden"
+      : true; // unknown tab ids (e.g. modals) are left alone
 
-    const accessMap: Record<string, boolean> = {
-      dashboard: true,
-      designer: isSuper || isAdminRole,
-      reader: isSuper || isAdminRole,
-      excel: isSuper || isAdminRole || isIT,
-      assets: isSuper || isAdminRole || isIT,
-      directory: true,
-      users: isSuper || isAdminRole,
-      workflows: true,
-      qr: isSuper || isAdminRole || isIT,
-      mobile: true,
-      audit: isSuper,
-      powerbi: isSuper || isAdminRole,
-      developer: isSuper,
-      manuals: true
-    };
-
-    if (!accessMap[activeTab]) {
+    if (!isAccessible) {
       setActiveTab("dashboard");
     }
-  }, [activeRole, activeTab, currentUser]);
+  }, [activeRole, activeTab, currentUser, currentOrganization]);
 
   // Real-Time Firestore Synchronization for Dev & Published Apps
   useEffect(() => {
@@ -1684,18 +1672,19 @@ export default function App() {
   const brandColor = currentOrganization?.primaryColor || "#1d4ed8";
 
   const getNavItemClass = (tabId: string) => {
-    const base = "w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold transition-all rounded-lg ";
+    const base = "w-full flex items-center gap-3 px-3 py-2.5 text-xs font-semibold transition-all rounded-xl ";
     if (activeTab === tabId) {
-      return base + "font-bold shadow-2xs";
+      return base + "font-bold shadow-md";
     }
-    return base + "hover:bg-slate-50 text-slate-600";
+    return base + "hover:bg-slate-200/70 text-slate-600";
   };
 
-  // Active nav items are tinted with the signed-in company's own brand color
-  // instead of a fixed blue, so each workspace's sidebar feels like its own.
+  // Active nav items are filled solid with the signed-in company's own brand
+  // color instead of a fixed blue, so each workspace's sidebar feels like its
+  // own — not just a faint tint of it.
   const getNavItemStyle = (tabId: string): React.CSSProperties => {
     if (activeTab !== tabId) return {};
-    return { backgroundColor: `${brandColor}17`, color: brandColor };
+    return { backgroundColor: brandColor, color: "#ffffff", boxShadow: `0 4px 12px -2px ${brandColor}66` };
   };
 
   // Password reset link routing: if the URL carries a ?resetToken=..., always
@@ -1876,13 +1865,13 @@ export default function App() {
     <div className="h-screen w-full bg-slate-50 text-slate-900 font-sans flex overflow-hidden antialiased" id="app-root-container">
       {/* LEFT APPLICATION NAVIGATION SIDEBAR */}
       <aside 
-        className={`bg-white border-r border-slate-200 flex flex-col shrink-0 transition-all duration-300 ${
+        className={`bg-slate-50 border-r border-slate-200 flex flex-col shrink-0 transition-all duration-300 ${
           isSidebarOpen ? "w-64 opacity-100" : "w-0 opacity-0 overflow-hidden pointer-events-none border-r-0"
         }`} 
         id="app-sidebar-rail"
       >
         {/* Brand Section — reflects the signed-in company's own branding */}
-        <div className="p-4 flex items-center justify-between border-b border-slate-100">
+        <div className="p-4 flex items-center justify-between border-b border-slate-200 bg-white">
           <div className="flex items-center space-x-3 min-w-0">
             <div
               className="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-lg shrink-0 font-bold text-[11px]"
@@ -2097,10 +2086,10 @@ export default function App() {
         </div>
 
         {/* Sidebar Footer User Details */}
-        <div className="p-4 border-t border-slate-100 mt-auto">
+        <div className="p-4 border-t border-slate-200 mt-auto">
           <button 
             onClick={() => setIsProfileModalOpen(true)}
-            className="w-full bg-slate-50 hover:bg-slate-100 p-3 rounded-xl flex items-center space-x-3 transition-colors text-left cursor-pointer group"
+            className="w-full bg-white hover:bg-slate-100 border border-slate-200 p-3 rounded-xl flex items-center space-x-3 transition-colors text-left cursor-pointer group"
             title="Manage Profile Photo & Password Settings"
           >
             {currentUser.avatarUrl ? (
