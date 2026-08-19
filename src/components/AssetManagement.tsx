@@ -34,6 +34,7 @@ interface AssetManagementProps {
   onDeleteAsset: (assetId: string) => void;
   onBulkDeleteAssets?: (assetIds: string[]) => void;
   onAddAuditLog: (action: string, category: any, details: string) => void;
+  editAccessOverride?: "edit" | "view";
 }
 
 export default function AssetManagement({
@@ -45,7 +46,8 @@ export default function AssetManagement({
   onUpdateAsset,
   onDeleteAsset,
   onBulkDeleteAssets,
-  onAddAuditLog
+  onAddAuditLog,
+  editAccessOverride
 }: AssetManagementProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("ALL");
@@ -77,7 +79,7 @@ export default function AssetManagement({
   const [targetEmployeeId, setTargetEmployeeId] = useState("");
   const [targetSeatNumber, setTargetSeatNumber] = useState("");
 
-  const isAuthorized = ["Super User", "Admin", "IT Administrator"].includes(activeRole);
+  const isAuthorized = editAccessOverride ? editAccessOverride === "edit" : ["Super User", "Admin", "IT Administrator"].includes(activeRole);
 
   // Filtered Assets
   const filteredAssets = assets.filter(asset => {

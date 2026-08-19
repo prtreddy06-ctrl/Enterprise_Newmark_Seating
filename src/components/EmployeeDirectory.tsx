@@ -38,6 +38,7 @@ interface EmployeeDirectoryProps {
   onBulkAddEmployeesAndUsers?: (newUsers: UserAccount[], newEmps: EmployeeProfile[]) => void;
   onDeleteEmployee?: (empId: string) => void;
   onBulkDeleteEmployees?: (empIds: string[]) => void;
+  editAccessOverride?: "edit" | "view";
 }
 
 export default function EmployeeDirectory({
@@ -49,7 +50,8 @@ export default function EmployeeDirectory({
   onAddAuditLog,
   onBulkAddEmployeesAndUsers,
   onDeleteEmployee,
-  onBulkDeleteEmployees
+  onBulkDeleteEmployees,
+  editAccessOverride
 }: EmployeeDirectoryProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDept, setFilterDept] = useState("ALL");
@@ -115,7 +117,7 @@ export default function EmployeeDirectory({
     );
   };
 
-  const isAuthorized = ["Super User", "Admin", "IT Administrator"].includes(activeRole);
+  const isAuthorized = editAccessOverride ? editAccessOverride === "edit" : ["Super User", "Admin", "IT Administrator"].includes(activeRole);
 
   const handleSingleDelete = (emp: EmployeeProfile) => {
     if (!isAuthorized) {

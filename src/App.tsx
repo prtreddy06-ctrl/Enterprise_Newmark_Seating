@@ -43,6 +43,7 @@ import AuditLogsView from "./components/AuditLogsView";
 import PowerBIDashboard from "./components/PowerBIDashboard";
 import DeveloperFiles from "./components/DeveloperFiles";
 import ManualsView from "./components/ManualsView";
+import MasterConfiguration from "./components/MasterConfiguration";
 import EncryptionSecurityModal from "./components/EncryptionSecurityModal";
 import { getEncryptedStorage, setEncryptedStorage, reencryptAllLocalStorage, clearAllEnterprizCache } from "./lib/encryption";
 import { 
@@ -71,7 +72,15 @@ import {
   Users,
   ShieldCheck,
   ShieldAlert,
-  PanelLeftClose
+  PanelLeftClose,
+  Settings,
+  Download,
+  Upload,
+  Eye,
+  Pencil,
+  Ban,
+  Building2,
+  Palette
 } from "lucide-react";
 
 const OLD_DEMO_EMAILS = [
@@ -246,6 +255,72 @@ const loadInitialSessionUser = (userList: UserAccount[]): UserAccount | null => 
   }
   return null;
 };
+
+// ---------------------------------------------------------------------------
+// Master Configuration: module registry + default per-role access levels.
+// A Super User can override any of this per-company from the Master
+// Configuration screen (hide a module entirely, or set a role's access to
+// "view" instead of "edit"). Missing/unset entries fall back to these
+// defaults, which mirror the app's original hardcoded role gating.
+// ---------------------------------------------------------------------------
+export type ModuleAccessLevel = "edit" | "view" | "hidden";
+
+export interface ModuleDefinition {
+  id: string;
+  label: string;
+  // Not offered in the Module Visibility / Role Permission editor — always on,
+  // so a Super User can never accidentally lock themselves out of the app.
+  locked?: boolean;
+  defaultAccess: Record<string, ModuleAccessLevel>;
+}
+
+export const MODULE_DEFINITIONS: ModuleDefinition[] = [
+  { id: "dashboard", label: "Global Dashboard", locked: true, defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "edit", [UserRole.MEMBER]: "view", [UserRole.IT_ADMIN]: "view", [UserRole.USER]: "view"
+  }},
+  { id: "designer", label: "Floor Designer", defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "edit", [UserRole.MEMBER]: "view", [UserRole.IT_ADMIN]: "view", [UserRole.USER]: "view"
+  }},
+  { id: "workflows", label: "Seat Allocation", defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "edit", [UserRole.MEMBER]: "edit", [UserRole.IT_ADMIN]: "edit", [UserRole.USER]: "edit"
+  }},
+  { id: "assets", label: "IT Asset Matrix", defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "edit", [UserRole.MEMBER]: "hidden", [UserRole.IT_ADMIN]: "edit", [UserRole.USER]: "hidden"
+  }},
+  { id: "directory", label: "Employee Directory", defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "edit", [UserRole.MEMBER]: "view", [UserRole.IT_ADMIN]: "edit", [UserRole.USER]: "view"
+  }},
+  { id: "users", label: "User Account Ops", defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "edit", [UserRole.MEMBER]: "hidden", [UserRole.IT_ADMIN]: "hidden", [UserRole.USER]: "hidden"
+  }},
+  { id: "reader", label: "AI Floor Reader", defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "edit", [UserRole.MEMBER]: "hidden", [UserRole.IT_ADMIN]: "edit", [UserRole.USER]: "hidden"
+  }},
+  { id: "excel", label: "IT Asset Ingest", defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "edit", [UserRole.MEMBER]: "hidden", [UserRole.IT_ADMIN]: "edit", [UserRole.USER]: "hidden"
+  }},
+  { id: "qr", label: "QR Labels Matrix", defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "edit", [UserRole.MEMBER]: "hidden", [UserRole.IT_ADMIN]: "edit", [UserRole.USER]: "hidden"
+  }},
+  { id: "mobile", label: "Mobile Companion", defaultAccess: {
+    [UserRole.SUPER_USER]: "view", [UserRole.ADMIN]: "view", [UserRole.MEMBER]: "view", [UserRole.IT_ADMIN]: "view", [UserRole.USER]: "view"
+  }},
+  { id: "audit", label: "Audit Logs", defaultAccess: {
+    [UserRole.SUPER_USER]: "view", [UserRole.ADMIN]: "hidden", [UserRole.MEMBER]: "hidden", [UserRole.IT_ADMIN]: "hidden", [UserRole.USER]: "hidden"
+  }},
+  { id: "powerbi", label: "Power BI Analytics", defaultAccess: {
+    [UserRole.SUPER_USER]: "view", [UserRole.ADMIN]: "view", [UserRole.MEMBER]: "hidden", [UserRole.IT_ADMIN]: "hidden", [UserRole.USER]: "hidden"
+  }},
+  { id: "developer", label: "DevOps Blueprints", defaultAccess: {
+    [UserRole.SUPER_USER]: "view", [UserRole.ADMIN]: "hidden", [UserRole.MEMBER]: "hidden", [UserRole.IT_ADMIN]: "hidden", [UserRole.USER]: "hidden"
+  }},
+  { id: "manuals", label: "Operational Handbooks", defaultAccess: {
+    [UserRole.SUPER_USER]: "view", [UserRole.ADMIN]: "view", [UserRole.MEMBER]: "view", [UserRole.IT_ADMIN]: "view", [UserRole.USER]: "view"
+  }},
+  { id: "masterConfig", label: "Master Configuration", locked: true, defaultAccess: {
+    [UserRole.SUPER_USER]: "edit", [UserRole.ADMIN]: "hidden", [UserRole.MEMBER]: "hidden", [UserRole.IT_ADMIN]: "hidden", [UserRole.USER]: "hidden"
+  }}
+];
 
 const initialLayoutObjects: LayoutObject[] = [
   { id: "obj-1", floorId: "f1", name: "Executive Suite A", type: "Cabin", x: 620, y: 300, width: 140, height: 100, rotation: 0, color: "#cbd5e1" },
@@ -830,6 +905,71 @@ export default function App() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
   const [isEncryptionModalOpen, setIsEncryptionModalOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+
+  // Master Configuration: Super User creates a new company workspace from
+  // inside the app (same mechanism the public sign-up screen uses).
+  const handleCreateOrganizationFromMasterConfig = (org: Organization, adminUser: UserAccount, starterSite: LocationSite) => {
+    setOrganizations(prev => [...prev, org]);
+    saveFirestoreDoc("organizations", org);
+
+    setUsers(prev => [adminUser, ...prev]);
+    saveFirestoreDoc("users", adminUser);
+
+    const adminEmpProfile: EmployeeProfile = {
+      id: `emp-${adminUser.id}`,
+      name: adminUser.name,
+      email: adminUser.email,
+      department: adminUser.department || "Leadership",
+      company: org.name,
+      manager: "—",
+      floor: "",
+      zone: "",
+      seatNumber: "",
+      seatType: "Standard",
+      occupancyStatus: "Vacant",
+      assignedAssets: [],
+      lastLogin: adminUser.lastLogin || new Date().toISOString(),
+      accountStatus: "Active",
+      role: adminUser.role,
+      organizationId: org.id
+    };
+    setEmployees(prev => [adminEmpProfile, ...prev]);
+    saveFirestoreDoc("employees", adminEmpProfile);
+
+    handleAddNewSite(starterSite, `${org.name} Primary Tower`, org.id);
+  };
+
+  const handleUpdateOrganization = (updatedOrg: Organization) => {
+    setOrganizations(prev => prev.map(o => o.id === updatedOrg.id ? updatedOrg : o));
+    saveFirestoreDoc("organizations", updatedOrg);
+  };
+
+  // Master Configuration: merge an uploaded seating backup into the current
+  // org's data by id (imported records overwrite matching ids, new ones are
+  // added) — existing records outside the backup are left untouched.
+  const handleImportSeatingData = (backup: {
+    sites: LocationSite[]; buildings: Building[]; floors: Floor[]; zones: Zone[]; seats: Seat[]; layoutObjects: LayoutObject[];
+  }) => {
+    const upsert = <T extends { id: string }>(existingOrgItems: T[], imported: T[]): T[] => {
+      const map = new Map(existingOrgItems.map(i => [i.id, i]));
+      imported.forEach(i => map.set(i.id, { ...i, organizationId: myOrgId } as T));
+      return Array.from(map.values());
+    };
+
+    setSites(prev => {
+      const others = prev.filter(s => !belongsToMyOrg(s));
+      const mine = prev.filter(belongsToMyOrg);
+      const merged = upsert(mine, backup.sites);
+      merged.forEach(s => saveFirestoreDoc("sites", s));
+      return [...others, ...merged];
+    });
+
+    handleUpdateBuildings(upsert(buildings.filter(belongsToMyOrg), backup.buildings));
+    handleUpdateFloors(upsert(floors.filter(belongsToMyOrg), backup.floors));
+    handleUpdateZones(upsert(zones.filter(belongsToMyOrg), backup.zones));
+    handleUpdateSeats(upsert(seats.filter(belongsToMyOrg), backup.seats));
+    handleUpdateLayoutObjects(upsert(layoutObjects.filter(belongsToMyOrg), backup.layoutObjects));
+  };
 
   const handleUpdateCurrentUserProfile = (updatedUser: UserAccount) => {
     setCurrentUser(updatedUser);
@@ -1541,12 +1681,21 @@ export default function App() {
   const pendingRequestsCount = requests.filter(r => r.status === "Pending" || r.status === "Escalated").length;
 
   // Sidebar navigation item class helper
+  const brandColor = currentOrganization?.primaryColor || "#1d4ed8";
+
   const getNavItemClass = (tabId: string) => {
     const base = "w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold transition-all rounded-lg ";
     if (activeTab === tabId) {
-      return base + "bg-blue-50 text-blue-700 font-bold shadow-2xs";
+      return base + "font-bold shadow-2xs";
     }
     return base + "hover:bg-slate-50 text-slate-600";
+  };
+
+  // Active nav items are tinted with the signed-in company's own brand color
+  // instead of a fixed blue, so each workspace's sidebar feels like its own.
+  const getNavItemStyle = (tabId: string): React.CSSProperties => {
+    if (activeTab !== tabId) return {};
+    return { backgroundColor: `${brandColor}17`, color: brandColor };
   };
 
   // Password reset link routing: if the URL carries a ?resetToken=..., always
@@ -1687,15 +1836,34 @@ export default function App() {
   const isAdmin = activeRole === UserRole.ADMIN;
   const isITAdmin = activeRole === UserRole.IT_ADMIN;
 
-  const canAccessDesigner = true; // All roles can view the Floor Map & Designer (editing restricted to Super User & Admin inside component)
-  const canAccessReader = isSuperUser || isAdmin || isITAdmin;
-  const canAccessExcel = isSuperUser || isAdmin || isITAdmin;
-  const canAccessAssets = isSuperUser || isAdmin || isITAdmin;
-  const canAccessUsers = isSuperUser || isAdmin;
-  const canAccessQR = isSuperUser || isAdmin || isITAdmin;
-  const canAccessAudit = isSuperUser;
-  const canAccessPowerBI = isSuperUser || isAdmin;
-  const canAccessDeveloper = isSuperUser;
+  // Master Configuration: resolve this org's per-module, per-role access level,
+  // falling back to MODULE_DEFINITIONS' defaults for anything not explicitly
+  // set. Org-wide "hiddenModules" wins over everything except the dashboard
+  // (which is locked on, so nobody — including Super User — can be fully
+  // locked out of the app).
+  const getModuleAccess = (moduleId: string): ModuleAccessLevel => {
+    const moduleDef = MODULE_DEFINITIONS.find(m => m.id === moduleId);
+    if (moduleDef?.locked) return moduleDef.defaultAccess[activeRole] || "view";
+    if (currentOrganization?.hiddenModules?.includes(moduleId)) return "hidden";
+    const override = currentOrganization?.rolePermissions?.[activeRole]?.[moduleId];
+    if (override) return override;
+    return moduleDef?.defaultAccess[activeRole] || "hidden";
+  };
+
+  const canAccessDesigner = getModuleAccess("designer") !== "hidden";
+  const canAccessWorkflows = getModuleAccess("workflows") !== "hidden";
+  const canAccessDirectory = getModuleAccess("directory") !== "hidden";
+  const canAccessReader = getModuleAccess("reader") !== "hidden";
+  const canAccessExcel = getModuleAccess("excel") !== "hidden";
+  const canAccessAssets = getModuleAccess("assets") !== "hidden";
+  const canAccessUsers = getModuleAccess("users") !== "hidden";
+  const canAccessQR = getModuleAccess("qr") !== "hidden";
+  const canAccessMobile = getModuleAccess("mobile") !== "hidden";
+  const canAccessAudit = getModuleAccess("audit") !== "hidden";
+  const canAccessPowerBI = getModuleAccess("powerbi") !== "hidden";
+  const canAccessDeveloper = getModuleAccess("developer") !== "hidden";
+  const canAccessManuals = getModuleAccess("manuals") !== "hidden";
+  const canAccessMasterConfig = isSuperUser;
 
   const currentUserInitials = currentUser.name
     .split(" ")
@@ -1744,6 +1912,7 @@ export default function App() {
             <button 
               onClick={() => setActiveTab("dashboard")}
               className={getNavItemClass("dashboard")}
+              style={getNavItemStyle("dashboard")}
               id="btn-nav-dashboard"
             >
               <Grid size={15} />
@@ -1754,6 +1923,7 @@ export default function App() {
               <button 
                 onClick={() => setActiveTab("designer")}
                 className={getNavItemClass("designer")}
+              style={getNavItemStyle("designer")}
                 id="btn-nav-designer"
               >
                 <MapIcon size={15} />
@@ -1761,9 +1931,11 @@ export default function App() {
               </button>
             )}
 
+            {canAccessWorkflows && (
             <button 
               onClick={() => setActiveTab("workflows")}
               className={`${getNavItemClass("workflows")} justify-between`}
+              style={getNavItemStyle("workflows")}
               id="btn-nav-workflows"
             >
               <span className="flex items-center gap-3">
@@ -1776,11 +1948,13 @@ export default function App() {
                 </span>
               )}
             </button>
+            )}
 
             {canAccessAssets && (
               <button 
                 onClick={() => setActiveTab("assets")}
                 className={getNavItemClass("assets")}
+              style={getNavItemStyle("assets")}
                 id="btn-nav-assets"
               >
                 <Cpu size={15} />
@@ -1788,19 +1962,23 @@ export default function App() {
               </button>
             )}
 
+            {canAccessDirectory && (
             <button 
               onClick={() => setActiveTab("directory")}
               className={getNavItemClass("directory")}
+              style={getNavItemStyle("directory")}
               id="btn-nav-directory"
             >
               <Users size={15} />
               <span>Employee Directory</span>
             </button>
+            )}
 
             {canAccessUsers && (
               <button 
                 onClick={() => setActiveTab("users")}
                 className={getNavItemClass("users")}
+              style={getNavItemStyle("users")}
                 id="btn-nav-users"
               >
                 <ShieldCheck size={15} />
@@ -1812,6 +1990,7 @@ export default function App() {
               <button 
                 onClick={() => setActiveTab("reader")}
                 className={getNavItemClass("reader")}
+              style={getNavItemStyle("reader")}
                 id="btn-nav-reader"
               >
                 <Sparkles size={15} />
@@ -1823,6 +2002,7 @@ export default function App() {
               <button 
                 onClick={() => setActiveTab("excel")}
                 className={getNavItemClass("excel")}
+              style={getNavItemStyle("excel")}
                 id="btn-nav-excel"
               >
                 <UploadCloud size={15} />
@@ -1834,6 +2014,7 @@ export default function App() {
               <button 
                 onClick={() => setActiveTab("qr")}
                 className={getNavItemClass("qr")}
+              style={getNavItemStyle("qr")}
                 id="btn-nav-qr"
               >
                 <QrCode size={15} />
@@ -1841,19 +2022,23 @@ export default function App() {
               </button>
             )}
 
+            {canAccessMobile && (
             <button 
               onClick={() => setActiveTab("mobile")}
               className={getNavItemClass("mobile")}
+              style={getNavItemStyle("mobile")}
               id="btn-nav-mobile"
             >
               <Smartphone size={15} />
               <span>Mobile Companion</span>
             </button>
+            )}
 
             {canAccessAudit && (
               <button 
                 onClick={() => setActiveTab("audit")}
                 className={getNavItemClass("audit")}
+              style={getNavItemStyle("audit")}
                 id="btn-nav-audit"
               >
                 <Activity size={15} />
@@ -1865,6 +2050,7 @@ export default function App() {
               <button 
                 onClick={() => setActiveTab("powerbi")}
                 className={getNavItemClass("powerbi")}
+              style={getNavItemStyle("powerbi")}
                 id="btn-nav-powerbi"
               >
                 <BarChart size={15} />
@@ -1876,6 +2062,7 @@ export default function App() {
               <button 
                 onClick={() => setActiveTab("developer")}
                 className={getNavItemClass("developer")}
+              style={getNavItemStyle("developer")}
                 id="btn-nav-developer"
               >
                 <Terminal size={15} />
@@ -1883,14 +2070,29 @@ export default function App() {
               </button>
             )}
 
+            {canAccessManuals && (
             <button 
               onClick={() => setActiveTab("manuals")}
               className={getNavItemClass("manuals")}
+              style={getNavItemStyle("manuals")}
               id="btn-nav-manuals"
             >
               <BookOpen size={15} />
               <span>Operational Handbooks</span>
             </button>
+            )}
+
+            {canAccessMasterConfig && (
+              <button
+                onClick={() => setActiveTab("masterConfig")}
+                className={getNavItemClass("masterConfig")}
+                style={getNavItemStyle("masterConfig")}
+                id="btn-nav-masterconfig"
+              >
+                <Settings size={15} />
+                <span>Master Configuration</span>
+              </button>
+            )}
           </nav>
         </div>
 
@@ -1951,6 +2153,7 @@ export default function App() {
           onOpenEncryptionModal={() => setIsEncryptionModalOpen(true)}
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
+          brandColor={brandColor}
         />
 
         {/* MAIN CANVAS BODY */}
@@ -1992,6 +2195,7 @@ export default function App() {
               onCommitExtractedFloor={handleCommitFloorData}
               onAddAuditLog={logAuditAction}
               activeRole={activeRole}
+              brandColor={brandColor}
             />
           )}
 
@@ -2133,6 +2337,25 @@ export default function App() {
 
           {activeTab === "manuals" && (
             <ManualsView />
+          )}
+
+          {activeTab === "masterConfig" && canAccessMasterConfig && (
+            <MasterConfiguration
+              currentOrganization={currentOrganization}
+              organizations={organizations}
+              moduleDefinitions={MODULE_DEFINITIONS}
+              existingUsers={users}
+              sitesInOrg={sitesInOrg}
+              buildingsInOrg={buildingsInOrg}
+              floorsInOrg={floorsInOrg}
+              zonesInOrg={zonesInOrg}
+              seatsInOrg={seatsInOrg}
+              layoutObjectsInOrg={layoutObjectsInOrg}
+              onUpdateOrganization={handleUpdateOrganization}
+              onCreateOrganization={handleCreateOrganizationFromMasterConfig}
+              onImportSeatingData={handleImportSeatingData}
+              onAddAuditLog={logAuditAction}
+            />
           )}
         </main>
 

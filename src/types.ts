@@ -20,6 +20,18 @@ export interface Organization {
   plan?: "Trial" | "Standard" | "Enterprise";
   ownerEmail: string;
   createdAt: string;
+  // Master Configuration: which sidebar modules are switched off for everyone
+  // in this workspace, regardless of role (e.g. "we never use DevOps Blueprints").
+  hiddenModules?: string[];
+  // Master Configuration: per-role access level for each module. Missing
+  // entries fall back to the module's built-in default (see MODULE_DEFINITIONS
+  // in App.tsx). Super User is intentionally not fully overridable to "hidden"
+  // for its own account, to avoid an admin locking themselves out.
+  rolePermissions?: {
+    [role: string]: {
+      [moduleId: string]: "edit" | "view" | "hidden";
+    };
+  };
 }
 
 export interface LocationSite {

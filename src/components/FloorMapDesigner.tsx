@@ -92,6 +92,8 @@ interface FloorMapDesignerProps {
   }) => void;
   onAddAuditLog?: (action: string, category: any, details: string) => void;
   activeRole: string;
+  brandColor?: string;
+  editAccessOverride?: "edit" | "view";
 }
 
 export default function FloorMapDesigner({ 
@@ -110,9 +112,13 @@ export default function FloorMapDesigner({
   onUpdateFloors,
   onCommitExtractedFloor,
   onAddAuditLog,
-  activeRole
+  activeRole,
+  brandColor = "#1d4ed8",
+  editAccessOverride
 }: FloorMapDesignerProps) {
-  const canEditLayout = activeRole === UserRole.SUPER_USER || activeRole === UserRole.ADMIN || activeRole === "Super User" || activeRole === "Admin";
+  const canEditLayout = editAccessOverride
+    ? editAccessOverride === "edit"
+    : (activeRole === UserRole.SUPER_USER || activeRole === UserRole.ADMIN || activeRole === "Super User" || activeRole === "Admin");
 
   // Map Edit Protection Mode: defaults to false (Protected View Map mode) to prevent accidental layout modifications
   const [isMapEditMode, setIsMapEditMode] = useState<boolean>(false);
@@ -2617,12 +2623,17 @@ export default function FloorMapDesigner({
           ? (showSidebarPalette
               ? "flex-1 grid grid-cols-1 xl:grid-cols-5 gap-4 h-[calc(100vh-85px)] min-h-0 overflow-hidden"
               : "flex-1 grid grid-cols-1 gap-4 h-[calc(100vh-85px)] min-h-0 overflow-hidden")
-          : (showSidebarPalette ? "grid grid-cols-1 xl:grid-cols-4 gap-6" : "grid grid-cols-1 gap-6")
+          : (showSidebarPalette
+              ? "grid grid-cols-1 xl:grid-cols-4 gap-6 h-[calc(100vh-250px)] min-h-[560px]"
+              : "grid grid-cols-1 gap-6 h-[calc(100vh-250px)] min-h-[560px]")
       }>
         {/* LEFT DOCK: SCOPE SELECTORS & DRAGGABLE PALETTE — hidden until Edit Map or explicitly shown */}
         {showSidebarPalette && (
-        <div className={isFullScreen ? "bg-slate-800 p-4 rounded-xl border-2 border-blue-600/70 shadow-md flex flex-col space-y-4 overflow-y-auto max-h-full xl:col-span-1 text-slate-100" : "bg-white p-0 rounded-2xl border-2 border-blue-700 shadow-xs flex flex-col overflow-hidden"}>
-          <div className={isFullScreen ? "" : "bg-blue-700 px-5 py-3.5 -mx-0"}>
+        <div
+          className={isFullScreen ? "bg-slate-800 p-4 rounded-xl border-2 shadow-md flex flex-col space-y-4 overflow-y-auto max-h-full xl:col-span-1 text-slate-100" : "bg-white p-0 rounded-2xl border-2 shadow-xs flex flex-col overflow-hidden"}
+          style={{ borderColor: isFullScreen ? `${brandColor}b3` : brandColor }}
+        >
+          <div className={isFullScreen ? "" : "px-5 py-3.5 -mx-0"} style={isFullScreen ? {} : { backgroundColor: brandColor }}>
             <h4 className={`text-sm font-bold tracking-tight uppercase flex items-center gap-2 ${isFullScreen ? "text-slate-800" : "text-white"}`}>
               <Layers className={isFullScreen ? "text-blue-600" : "text-blue-100"} size={16} />
               <span>Scope & Palette</span>
@@ -3430,7 +3441,7 @@ export default function FloorMapDesigner({
         )}
 
         {/* CENTRAL CANVAS */}
-        <div className={isFullScreen ? "bg-slate-950 rounded-xl border border-slate-800 p-3 xl:col-span-4 flex flex-col space-y-2 h-full relative overflow-hidden" : "bg-slate-100 rounded-2xl border border-slate-200 p-4 xl:col-span-3 flex flex-col space-y-3 min-h-[580px] relative overflow-hidden"} id="floor-canvas-container">
+        <div className={isFullScreen ? "bg-slate-950 rounded-xl border border-slate-800 p-3 xl:col-span-4 flex flex-col space-y-2 h-full relative overflow-hidden" : "bg-slate-100 rounded-2xl border border-slate-200 p-4 xl:col-span-3 flex flex-col space-y-3 h-full min-h-[560px] relative overflow-hidden"} id="floor-canvas-container">
           {/* Upper Toolbar */}
           <div className={isFullScreen ? "bg-slate-900/90 backdrop-blur-xs p-3 rounded-xl border border-slate-800 flex flex-wrap gap-3 items-center justify-between z-10 text-slate-100" : "bg-white/90 backdrop-blur-xs p-3.5 rounded-xl border border-slate-200 flex flex-wrap gap-4 items-center justify-between z-10"}>
             <div className="flex items-center gap-2 flex-wrap">
@@ -3803,7 +3814,7 @@ export default function FloorMapDesigner({
             {/* LAYERS PANEL — floating, screen-space (not affected by canvas zoom/pan) */}
             {showLayersPanel && canEditLayout && (
               <div className="absolute top-3 right-3 z-[65] w-64 max-h-[70%] bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col overflow-hidden">
-                <div className="bg-blue-700 px-3 py-2 flex items-center justify-between shrink-0">
+                <div className="px-3 py-2 flex items-center justify-between shrink-0" style={{ backgroundColor: brandColor }}>
                   <span className="text-xs font-bold text-white flex items-center gap-1.5">
                     <Layers size={13} />
                     <span>Layers</span>

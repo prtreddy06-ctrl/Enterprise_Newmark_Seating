@@ -37,6 +37,7 @@ interface UserManagementProps {
   onAddAuditLog: (action: string, category: any, details: string) => void;
   onBulkAddEmployeesAndUsers?: (newUsers: UserAccount[], newEmps: any[]) => void;
   onUpdateSeats?: (updatedSeats: Seat[]) => void;
+  editAccessOverride?: "edit" | "view";
 }
 
 export default function UserManagement({
@@ -49,7 +50,8 @@ export default function UserManagement({
   onBulkDeleteUsers,
   onAddAuditLog,
   onBulkAddEmployeesAndUsers,
-  onUpdateSeats
+  onUpdateSeats,
+  editAccessOverride
 }: UserManagementProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterRole, setFilterRole] = useState("ALL");
@@ -77,7 +79,7 @@ export default function UserManagement({
   const [formSeatNumber, setFormSeatNumber] = useState("");
   const [formStatus, setFormStatus] = useState<"Active" | "Inactive" | "Locked">("Active");
 
-  const isAuthorized = ["Super User", "Admin"].includes(activeRole);
+  const isAuthorized = editAccessOverride ? editAccessOverride === "edit" : ["Super User", "Admin"].includes(activeRole);
 
   const availableDepartments = useMemo(() => {
     const set = new Set<string>();

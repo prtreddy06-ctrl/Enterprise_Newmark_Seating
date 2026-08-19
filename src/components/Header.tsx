@@ -41,6 +41,7 @@ interface HeaderProps {
   onOpenEncryptionModal?: () => void;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  brandColor?: string;
 }
 
 export default function Header({ 
@@ -60,7 +61,8 @@ export default function Header({
   onOpenProfileModal,
   onOpenEncryptionModal,
   isSidebarOpen = true,
-  onToggleSidebar
+  onToggleSidebar,
+  brandColor = "#1d4ed8"
 }: HeaderProps) {
   const [showDownloadsModal, setShowDownloadsModal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -431,7 +433,7 @@ export default function Header({
                 id="profile-avatar"
               />
             ) : (
-              <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs group-hover:bg-blue-700 transition-colors shrink-0" id="profile-avatar">
+              <div className="w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-2xs transition-colors shrink-0" style={{ backgroundColor: brandColor }} id="profile-avatar">
                 {userInitials}
               </div>
             )}
