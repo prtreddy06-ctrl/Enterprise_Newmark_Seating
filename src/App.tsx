@@ -1674,17 +1674,17 @@ export default function App() {
   const getNavItemClass = (tabId: string) => {
     const base = "w-full flex items-center gap-3 px-3 py-2.5 text-xs font-semibold transition-all rounded-xl ";
     if (activeTab === tabId) {
-      return base + "font-bold shadow-md";
+      return base + "font-bold shadow-md bg-white";
     }
-    return base + "hover:bg-slate-200/70 text-slate-600";
+    return base + "hover:bg-white/10 text-white/85";
   };
 
-  // Active nav items are filled solid with the signed-in company's own brand
-  // color instead of a fixed blue, so each workspace's sidebar feels like its
-  // own — not just a faint tint of it.
+  // Sidebar background is now a solid fill of the company's own brand color.
+  // The active item inverts to a white pill with brand-color text/icon so it
+  // still stands out clearly against the solid blue rail.
   const getNavItemStyle = (tabId: string): React.CSSProperties => {
     if (activeTab !== tabId) return {};
-    return { backgroundColor: brandColor, color: "#ffffff", boxShadow: `0 4px 12px -2px ${brandColor}66` };
+    return { color: brandColor };
   };
 
   // Password reset link routing: if the URL carries a ?resetToken=..., always
@@ -1863,32 +1863,33 @@ export default function App() {
 
   return (
     <div className="h-screen w-full bg-slate-50 text-slate-900 font-sans flex overflow-hidden antialiased" id="app-root-container">
-      {/* LEFT APPLICATION NAVIGATION SIDEBAR */}
+      {/* LEFT APPLICATION NAVIGATION SIDEBAR — solid company brand color background */}
       <aside 
-        className={`bg-slate-50 border-r border-slate-200 flex flex-col shrink-0 transition-all duration-300 ${
+        className={`border-r flex flex-col shrink-0 transition-all duration-300 ${
           isSidebarOpen ? "w-64 opacity-100" : "w-0 opacity-0 overflow-hidden pointer-events-none border-r-0"
         }`} 
+        style={{ backgroundColor: brandColor, borderColor: `${brandColor}` }}
         id="app-sidebar-rail"
       >
         {/* Brand Section — reflects the signed-in company's own branding */}
-        <div className="p-4 flex items-center justify-between border-b border-slate-200 bg-white">
+        <div className="p-4 flex items-center justify-between border-b" style={{ borderColor: "rgba(255,255,255,0.15)" }}>
           <div className="flex items-center space-x-3 min-w-0">
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-lg shrink-0 font-bold text-[11px]"
-              style={{ backgroundColor: currentOrganization?.primaryColor || "#1d4ed8" }}
+              className="w-8 h-8 rounded-lg flex items-center justify-center shadow-lg shrink-0 font-bold text-[11px]"
+              style={{ backgroundColor: "rgba(255,255,255,0.15)", color: "#ffffff" }}
             >
               {currentOrganization?.logoInitials || <Layers size={18} />}
             </div>
             <div className="min-w-0">
-              <span className="font-bold text-sm tracking-tight text-slate-800 block truncate" title={currentOrganization?.name}>
+              <span className="font-bold text-sm tracking-tight text-white block truncate" title={currentOrganization?.name}>
                 {currentOrganization?.name || "EnterprizSeat"}
               </span>
-              <span className="text-[9px] text-slate-400 font-mono uppercase tracking-wide">EnterprizSeat Platform</span>
+              <span className="text-[9px] text-white/60 font-mono uppercase tracking-wide">EnterprizSeat Platform</span>
             </div>
           </div>
           <button
             onClick={() => setIsSidebarOpen(false)}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
             title="Hide Navigation Sidebar"
           >
             <PanelLeftClose size={16} />
@@ -2086,26 +2087,26 @@ export default function App() {
         </div>
 
         {/* Sidebar Footer User Details */}
-        <div className="p-4 border-t border-slate-200 mt-auto">
+        <div className="p-4 border-t mt-auto" style={{ borderColor: "rgba(255,255,255,0.15)" }}>
           <button 
             onClick={() => setIsProfileModalOpen(true)}
-            className="w-full bg-white hover:bg-slate-100 border border-slate-200 p-3 rounded-xl flex items-center space-x-3 transition-colors text-left cursor-pointer group"
+            className="w-full bg-white/10 hover:bg-white/20 border border-white/10 p-3 rounded-xl flex items-center space-x-3 transition-colors text-left cursor-pointer group"
             title="Manage Profile Photo & Password Settings"
           >
             {currentUser.avatarUrl ? (
               <img
                 src={currentUser.avatarUrl}
                 alt={currentUser.name}
-                className="w-8 h-8 rounded-full object-cover border border-blue-500 shrink-0 shadow-2xs group-hover:scale-105 transition-transform"
+                className="w-8 h-8 rounded-full object-cover border border-white/40 shrink-0 shadow-2xs group-hover:scale-105 transition-transform"
               />
             ) : (
-              <div className="w-8 h-8 bg-blue-600 rounded-full text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs group-hover:bg-blue-700 transition-colors">
+              <div className="w-8 h-8 bg-white rounded-full font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs transition-colors" style={{ color: brandColor }}>
                 {currentUserInitials}
               </div>
             )}
             <div className="overflow-hidden text-left text-xs">
-              <p className="font-bold text-slate-800 truncate leading-snug group-hover:text-blue-600 transition-colors">{currentUser.name}</p>
-              <p className="text-[10px] text-slate-400 font-mono truncate leading-none mt-0.5">{currentUser.email}</p>
+              <p className="font-bold text-white truncate leading-snug transition-colors">{currentUser.name}</p>
+              <p className="text-[10px] text-white/60 font-mono truncate leading-none mt-0.5">{currentUser.email}</p>
             </div>
           </button>
         </div>
