@@ -23,13 +23,15 @@ interface LoginPortalProps {
   onLoginSuccess: (user: UserAccount) => void;
   onAddAuditLog: (action: string, category: any, details: string) => void;
   sessionExpiredNotice?: boolean;
+  onSwitchToSignUp?: () => void;
 }
 
 export default function LoginPortal({
   registeredUsers,
   onLoginSuccess,
   onAddAuditLog,
-  sessionExpiredNotice
+  sessionExpiredNotice,
+  onSwitchToSignUp
 }: LoginPortalProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -444,6 +446,16 @@ export default function LoginPortal({
                 <span>Enterprise SSO Enabled</span>
                 <span className="text-slate-400 font-mono">Build v2.4.0 • Active</span>
               </div>
+
+              {onSwitchToSignUp && (
+                <button
+                  type="button"
+                  onClick={onSwitchToSignUp}
+                  className="mt-4 w-full text-center text-[11px] font-semibold text-blue-400 hover:text-blue-300 underline cursor-pointer"
+                >
+                  New company? Create your own workspace
+                </button>
+              )}
             </>
           )}
         </div>

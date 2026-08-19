@@ -6,6 +6,22 @@ export enum UserRole {
   USER = "User"
 }
 
+// A tenant/company workspace. Every account, site, and downstream record
+// (buildings, floors, zones, seats, employees, assets, requests, logs)
+// carries an organizationId matching one of these so multiple companies
+// can use the same deployment with separate branding and separate data.
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string; // url/display-safe short code, e.g. "acme-corp"
+  primaryColor: string; // hex, drives sidebar/header accent for this company
+  logoInitials?: string; // 1-3 letters shown in the brand mark if no logo image
+  logoUrl?: string;
+  plan?: "Trial" | "Standard" | "Enterprise";
+  ownerEmail: string;
+  createdAt: string;
+}
+
 export interface LocationSite {
   id: string;
   name: string;
@@ -14,6 +30,7 @@ export interface LocationSite {
   address: string;
   timeZone: string;
   isDefault?: boolean;
+  organizationId?: string;
 }
 
 export interface Building {
@@ -22,6 +39,7 @@ export interface Building {
   location: string;
   floorsCount: number;
   siteId?: string;
+  organizationId?: string;
 }
 
 export interface Floor {
@@ -33,6 +51,7 @@ export interface Floor {
   isArchived?: boolean;
   lastModified?: string;
   siteId?: string;
+  organizationId?: string;
 }
 
 export interface AiReaderCopy {
@@ -74,6 +93,11 @@ export interface Zone {
   // x/y) instead of a plain rectangle. Each point can be dragged independently
   // so a single side can be pushed in/out without moving the whole edge.
   points?: { x: number; y: number }[];
+  // CAD layer controls
+  zIndex?: number;
+  isLocked?: boolean;
+  isHidden?: boolean;
+  organizationId?: string;
 }
 
 export interface ITAsset {
@@ -100,6 +124,7 @@ export interface ITAsset {
   seatId?: string;
   assignmentDate?: string;
   remarks?: string;
+  organizationId?: string;
 }
 
 export interface Seat {
@@ -122,6 +147,7 @@ export interface Seat {
   y: number;
   rotation?: number;
   assets?: ITAsset[];
+  organizationId?: string;
 }
 
 export interface LayoutObject {
@@ -135,6 +161,11 @@ export interface LayoutObject {
   height: number;
   rotation: number;
   color: string;
+  // CAD layer controls
+  zIndex?: number;
+  isLocked?: boolean;
+  isHidden?: boolean;
+  organizationId?: string;
 }
 
 export interface EmployeeProfile {
@@ -155,6 +186,7 @@ export interface EmployeeProfile {
   accountStatus: "Active" | "Inactive" | "Locked";
   role: UserRole;
   avatarUrl?: string;
+  organizationId?: string;
 }
 
 export interface UserAccount {
@@ -171,6 +203,7 @@ export interface UserAccount {
   tempPassword?: string;
   failedLoginAttempts?: number;
   avatarUrl?: string;
+  organizationId?: string;
 }
 
 export interface SeatRequest {
@@ -187,6 +220,7 @@ export interface SeatRequest {
   approvalComment?: string;
   approverName?: string;
   approvedAt?: string;
+  organizationId?: string;
 }
 
 export interface CheckInLog {
@@ -198,6 +232,7 @@ export interface CheckInLog {
   checkInTime: string;
   checkOutTime?: string;
   status: "Checked In" | "Checked Out";
+  organizationId?: string;
 }
 
 export interface AuditLog {
@@ -208,6 +243,7 @@ export interface AuditLog {
   category: "Login/Logout" | "User Ops" | "Floor Map" | "Zone/Seat" | "IT Asset" | "Excel Ingest" | "Seat Allocation" | "QR Check-in" | "System";
   details: string;
   ipAddress: string;
+  organizationId?: string;
 }
 
 export interface AssetExcelImportResult {

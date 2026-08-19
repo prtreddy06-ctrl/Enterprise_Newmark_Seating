@@ -1,5 +1,23 @@
-import { LocationSite, Building, Floor, Zone, Seat, SeatRequest, ITAsset, CheckInLog, AuditLog, EmployeeProfile, UserAccount, UserRole } from "../types";
+import { LocationSite, Building, Floor, Zone, Seat, SeatRequest, ITAsset, CheckInLog, AuditLog, EmployeeProfile, UserAccount, UserRole, Organization } from "../types";
 import { generateNewmarkBlueprintData } from "./newmarkFloorGenerator";
+
+// Default/original workspace — every record seeded below belongs to this org.
+// Existing records with no organizationId (from before multi-tenancy existed)
+// are treated as belonging to this org for backward compatibility.
+export const DEFAULT_ORG_ID = "org-newmark";
+
+export const initialOrganizations: Organization[] = [
+  {
+    id: DEFAULT_ORG_ID,
+    name: "Newmark",
+    slug: "newmark",
+    primaryColor: "#1d4ed8",
+    logoInitials: "NM",
+    plan: "Enterprise",
+    ownerEmail: "prtreddy06@gmail.com",
+    createdAt: "2026-01-10T00:00:00Z"
+  }
+];
 
 export const initialSites: LocationSite[] = [
   { 
@@ -9,24 +27,31 @@ export const initialSites: LocationSite[] = [
     country: "India", 
     address: "Building 11, Mindspace Cyberabad, Hitech City, Hyderabad, TS 500081", 
     timeZone: "IST (UTC+5:30)",
-    isDefault: true
+    isDefault: true,
+    organizationId: DEFAULT_ORG_ID
   }
 ];
 
 export const initialBuildings: Building[] = [
-  { id: "b1", name: "Newmark _Hyderabad", location: "Hyderabad, TS, India", floorsCount: 12, siteId: "site-hyd" }
+  { id: "b1", name: "Newmark _Hyderabad", location: "Hyderabad, TS, India", floorsCount: 12, siteId: "site-hyd", organizationId: DEFAULT_ORG_ID }
 ];
 
 export const initialFloors: Floor[] = [
-  { id: "f1", buildingId: "b1", name: "11 th Floor CRE", capacity: 555, zonesCount: 19, isArchived: false, lastModified: "2026-07-23" }
+  { id: "f1", buildingId: "b1", name: "11 th Floor CRE", capacity: 555, zonesCount: 19, isArchived: false, lastModified: "2026-07-23", organizationId: DEFAULT_ORG_ID }
 ];
+
 
 const defaultNewmarkData = generateNewmarkBlueprintData("b1", "f1");
 
-export const initialZones: Zone[] = defaultNewmarkData.zones;
-export const initialSeats: Seat[] = defaultNewmarkData.seats;
+// Stamp every seed record with the default organization so existing/new installs
+// of this app are automatically scoped to one workspace out of the box.
+const stampOrg = <T extends Record<string, any>>(arr: T[]): T[] =>
+  arr.map(item => ({ ...item, organizationId: DEFAULT_ORG_ID }));
 
-export const initialAssets: ITAsset[] = [
+export const initialZones: Zone[] = stampOrg(defaultNewmarkData.zones);
+export const initialSeats: Seat[] = stampOrg(defaultNewmarkData.seats);
+
+export const initialAssets: ITAsset[] = stampOrg([
   {
     id: "AST-1001",
     assetTag: "EQ-LP-8842",
@@ -171,7 +196,7 @@ export const initialAssets: ITAsset[] = [
     zone: "IT Bench A",
     remarks: "Undergoing RAM upgrade and thermal re-pasting."
   }
-];
+]);
 
 export const initialEmployees: EmployeeProfile[] = [
   {
@@ -189,7 +214,8 @@ export const initialEmployees: EmployeeProfile[] = [
     assignedAssets: [],
     lastLogin: "2026-07-21T09:55:00Z",
     accountStatus: "Active",
-    role: UserRole.SUPER_USER
+    role: UserRole.SUPER_USER,
+    organizationId: DEFAULT_ORG_ID
   }
 ];
 
@@ -203,17 +229,18 @@ export const initialUsers: UserAccount[] = [
     status: "Active", 
     password: "Raviteja@06049825",
     lastLogin: "2026-07-21T09:55:00Z", 
-    failedLoginAttempts: 0 
+    failedLoginAttempts: 0,
+    organizationId: DEFAULT_ORG_ID
   }
 ];
 
 export const initialSeatRequests: SeatRequest[] = [];
 
 export const initialCheckInLogs: CheckInLog[] = [
-  { id: "log-1", employeeName: "Raviteja Reddy palagiri", seatNumber: "A-100", buildingName: "Newmark _Hyderabad", floorName: "11 th Floor CRE", checkInTime: "2026-07-20T08:02:11-07:00", status: "Checked In" }
+  { id: "log-1", employeeName: "Raviteja Reddy palagiri", seatNumber: "A-100", buildingName: "Newmark _Hyderabad", floorName: "11 th Floor CRE", checkInTime: "2026-07-20T08:02:11-07:00", status: "Checked In", organizationId: DEFAULT_ORG_ID }
 ];
 
 export const initialAuditLogs: AuditLog[] = [
-  { id: "aud-1", timestamp: "2026-07-21T09:55:12Z", user: "Raviteja Reddy palagiri (Super User)", action: "User Login", category: "Login/Logout", details: "Successful JWT SSO authentication from Corporate Subnet.", ipAddress: "192.168.1.100" }
+  { id: "aud-1", timestamp: "2026-07-21T09:55:12Z", user: "Raviteja Reddy palagiri (Super User)", action: "User Login", category: "Login/Logout", details: "Successful JWT SSO authentication from Corporate Subnet.", ipAddress: "192.168.1.100", organizationId: DEFAULT_ORG_ID }
 ];
 

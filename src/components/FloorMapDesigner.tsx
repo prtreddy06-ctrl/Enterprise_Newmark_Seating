@@ -50,7 +50,8 @@ import {
   Users,
   ChevronDown,
   PanelLeftOpen,
-  PanelLeftClose
+  PanelLeftClose,
+  Ruler
 } from "lucide-react";
 
 interface LayoutVersion {
@@ -129,6 +130,9 @@ export default function FloorMapDesigner({
 
   // Department Name Search/Filter for Zone Highlighting
   const [departmentSearchQuery, setDepartmentSearchQuery] = useState<string>("");
+
+  // Vacant-Seat-Only Highlight — lets any role (view-only included) quickly spot open desks
+  const [showVacantOnly, setShowVacantOnly] = useState<boolean>(false);
 
   // Only suggest departments that actually have at least one real seat —
   // this stops empty/leftover demo zones (e.g. old seed data with 0 seats)
@@ -263,7 +267,7 @@ export default function FloorMapDesigner({
   
   // Selection and Canvas State
   const [selectedElement, setSelectedElement] = useState<{ type: "zone" | "seat" | "object"; id: string } | null>(null);
-  const [zoom, setZoom] = useState<number>(1);
+  const [zoom, setZoom] = useState<number>(0.6);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
@@ -271,6 +275,16 @@ export default function FloorMapDesigner({
   // Grid settings
   const [snapToGrid, setSnapToGrid] = useState<boolean>(true);
   const [gridSize, setGridSize] = useState<number>(20);
+
+  // Real CAD tools: rulers along the canvas edges + a two-click distance measurement tool
+  const [showRulers, setShowRulers] = useState<boolean>(true);
+  const [isMeasureMode, setIsMeasureMode] = useState<boolean>(false);
+  const [measurePoints, setMeasurePoints] = useState<{ x: number; y: number }[]>([]);
+  // 1 grid unit = 1 foot of real-world floor space (matches standard CAD desk/aisle sizing conventions)
+  const PIXELS_PER_FOOT = gridSize;
+
+  // Layers Panel: visibility/lock/z-order control over zones & layout objects
+  const [showLayersPanel, setShowLayersPanel] = useState<boolean>(false);
 
   // Multi-Seat Selection & Zone Constraint Lock State
   const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
@@ -1196,7 +1210,7 @@ export default function FloorMapDesigner({
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.1, 2.5));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.1, 0.2));
   const handleZoomReset = () => {
-    setZoom(1);
+    setZoom(0.6);
     setPan({ x: 0, y: 0 });
   };
 
@@ -1327,6 +1341,18 @@ export default function FloorMapDesigner({
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest("[data-draggable='true']")) {
+      return;
+    }
+
+    // Real CAD Measure Tool: click two points on the canvas to get a live distance readout
+    if (isMeasureMode && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const cursorX = (e.clientX - rect.left - pan.x) / zoom;
+      const cursorY = (e.clientY - rect.top - pan.y) / zoom;
+      setMeasurePoints(prev => {
+        if (prev.length >= 2) return [{ x: cursorX, y: cursorY }];
+        return [...prev, { x: cursorX, y: cursorY }];
+      });
       return;
     }
 
@@ -2587,20 +2613,23 @@ export default function FloorMapDesigner({
 
       {/* WORKSPACE GRID: LEFT DOCK & RIGHT CANVAS */}
       <div className={
-        !showSidebarPalette
-          ? "grid grid-cols-1"
-          : isFullScreen ? "flex-1 grid grid-cols-1 xl:grid-cols-5 gap-4 h-[calc(100vh-85px)] min-h-0 overflow-hidden" : "grid grid-cols-1 xl:grid-cols-4 gap-6"
+        isFullScreen
+          ? (showSidebarPalette
+              ? "flex-1 grid grid-cols-1 xl:grid-cols-5 gap-4 h-[calc(100vh-85px)] min-h-0 overflow-hidden"
+              : "flex-1 grid grid-cols-1 gap-4 h-[calc(100vh-85px)] min-h-0 overflow-hidden")
+          : (showSidebarPalette ? "grid grid-cols-1 xl:grid-cols-4 gap-6" : "grid grid-cols-1 gap-6")
       }>
         {/* LEFT DOCK: SCOPE SELECTORS & DRAGGABLE PALETTE — hidden until Edit Map or explicitly shown */}
         {showSidebarPalette && (
-        <div className={isFullScreen ? "bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-md flex flex-col space-y-4 overflow-y-auto max-h-full xl:col-span-1 text-slate-100" : "bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col space-y-6"}>
-          <div>
-            <h4 className="text-sm font-bold text-slate-800 tracking-tight uppercase flex items-center gap-2">
-              <Layers className="text-blue-600" size={16} />
+        <div className={isFullScreen ? "bg-slate-800 p-4 rounded-xl border-2 border-blue-600/70 shadow-md flex flex-col space-y-4 overflow-y-auto max-h-full xl:col-span-1 text-slate-100" : "bg-white p-0 rounded-2xl border-2 border-blue-700 shadow-xs flex flex-col overflow-hidden"}>
+          <div className={isFullScreen ? "" : "bg-blue-700 px-5 py-3.5 -mx-0"}>
+            <h4 className={`text-sm font-bold tracking-tight uppercase flex items-center gap-2 ${isFullScreen ? "text-slate-800" : "text-white"}`}>
+              <Layers className={isFullScreen ? "text-blue-600" : "text-blue-100"} size={16} />
               <span>Scope & Palette</span>
             </h4>
-            <p className="text-xs text-slate-400 mt-0.5">Pick location and drag CAD items onto grid</p>
+            <p className={`text-xs mt-0.5 ${isFullScreen ? "text-slate-400" : "text-blue-100"}`}>Pick location and drag CAD items onto grid</p>
           </div>
+          <div className={isFullScreen ? "flex-1 flex flex-col space-y-4 overflow-y-auto" : "flex-1 flex flex-col space-y-6 p-5 overflow-y-auto"}>
 
           {/* Building & Floor Dropdowns */}
           <div className="space-y-3" id="floor-selectors">
@@ -3396,6 +3425,7 @@ export default function FloorMapDesigner({
               )}
             </div>
           )}
+          </div>
         </div>
         )}
 
@@ -3513,6 +3543,20 @@ export default function FloorMapDesigner({
                   </>
                 )}
               </div>
+
+              {/* Vacant Seats Only Highlight Toggle — visible to every role, edit or view-only */}
+              <button
+                onClick={() => setShowVacantOnly(!showVacantOnly)}
+                title="Highlight only vacant/available seats on the map"
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  showVacantOnly
+                    ? "bg-emerald-600 border-emerald-600 text-white shadow-xs"
+                    : isFullScreen ? "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700" : "bg-emerald-50/70 border-emerald-200 text-emerald-800 hover:bg-emerald-100"
+                }`}
+              >
+                <CheckSquare size={13} />
+                <span>{showVacantOnly ? `Vacant Only (${currentSeats.filter(s => s.status === "Vacant").length})` : "Show Vacant Only"}</span>
+              </button>
             </div>
 
             {/* Quick Stats */}
@@ -3575,6 +3619,44 @@ export default function FloorMapDesigner({
                 }`}
               >
                 <Grid size={15} />
+              </button>
+
+              <button 
+                onClick={() => setShowRulers(!showRulers)}
+                title="Toggle CAD Rulers (feet)"
+                className={`p-1.5 rounded-lg border transition-all ${
+                  showRulers 
+                    ? "bg-blue-50 border-blue-200 text-blue-600 font-bold" 
+                    : isFullScreen ? "bg-slate-800 border-slate-700 text-slate-400" : "bg-white border-slate-200 text-slate-400"
+                }`}
+              >
+                <Ruler size={15} />
+              </button>
+
+              <button 
+                onClick={() => { setIsMeasureMode(!isMeasureMode); setMeasurePoints([]); }}
+                title="Measure Distance — click two points on the canvas"
+                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  isMeasureMode 
+                    ? "bg-blue-600 border-blue-600 text-white shadow-xs" 
+                    : isFullScreen ? "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                <Ruler size={13} />
+                <span>Measure</span>
+              </button>
+
+              <button 
+                onClick={() => setShowLayersPanel(!showLayersPanel)}
+                title="Open the Layers panel — show/hide, lock, and reorder zones & objects"
+                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  showLayersPanel 
+                    ? "bg-blue-600 border-blue-600 text-white shadow-xs" 
+                    : isFullScreen ? "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                <Layers size={13} />
+                <span>Layers</span>
               </button>
 
               {/* Zoom Controls */}
@@ -3668,6 +3750,150 @@ export default function FloorMapDesigner({
               </div>
             )}
 
+            {/* CAD RULERS — horizontal (top) & vertical (left), scaled with zoom/pan, labeled in feet */}
+            {showRulers && (
+              <>
+                <div className="absolute top-0 left-5 right-0 h-5 z-30 pointer-events-none overflow-hidden bg-white/80 border-b border-slate-300">
+                  {Array.from({ length: 120 }).map((_, i) => {
+                    const unitPx = gridSize * zoom;
+                    const screenX = (i * gridSize * zoom) + (pan.x % unitPx);
+                    if (screenX < 0 || screenX > 4000) return null;
+                    const isMajor = i % 5 === 0;
+                    return (
+                      <div key={i} className="absolute top-0" style={{ left: `${screenX}px` }}>
+                        <div className={isMajor ? "w-px h-3 bg-slate-500" : "w-px h-1.5 bg-slate-300"} />
+                        {isMajor && (
+                          <span className="absolute top-2.5 left-0.5 text-[8px] font-mono text-slate-500 whitespace-nowrap">
+                            {Math.round(((i * gridSize) - (pan.x / zoom > 0 ? 0 : 0)) / 1)}ft
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="absolute top-5 left-0 bottom-0 w-5 z-30 pointer-events-none overflow-hidden bg-white/80 border-r border-slate-300">
+                  {Array.from({ length: 120 }).map((_, i) => {
+                    const unitPx = gridSize * zoom;
+                    const screenY = (i * gridSize * zoom) + (pan.y % unitPx);
+                    if (screenY < 0 || screenY > 3000) return null;
+                    const isMajor = i % 5 === 0;
+                    return (
+                      <div key={i} className="absolute left-0" style={{ top: `${screenY}px` }}>
+                        <div className={isMajor ? "h-px w-3 bg-slate-500" : "h-px w-1.5 bg-slate-300"} />
+                        {isMajor && (
+                          <span className="absolute left-3 -top-1.5 text-[8px] font-mono text-slate-500 rotate-0 whitespace-nowrap">
+                            {i * gridSize}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* MEASURE TOOL prompt */}
+            {isMeasureMode && (
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] bg-blue-600 text-white px-3 py-1.5 rounded-xl shadow-lg text-[11px] font-bold flex items-center gap-2 pointer-events-none">
+                <Ruler size={13} />
+                <span>{measurePoints.length === 0 ? "Click a start point on the map" : measurePoints.length === 1 ? "Click an end point to measure" : "Click again to start a new measurement"}</span>
+              </div>
+            )}
+
+            {/* LAYERS PANEL — floating, screen-space (not affected by canvas zoom/pan) */}
+            {showLayersPanel && canEditLayout && (
+              <div className="absolute top-3 right-3 z-[65] w-64 max-h-[70%] bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+                <div className="bg-blue-700 px-3 py-2 flex items-center justify-between shrink-0">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Layers size={13} />
+                    <span>Layers</span>
+                  </span>
+                  <button onClick={() => setShowLayersPanel(false)} className="text-blue-100 hover:text-white text-sm font-bold cursor-pointer">×</button>
+                </div>
+                <div className="overflow-y-auto flex-1 divide-y divide-slate-100">
+                  {[
+                    ...currentZones.map(z => ({ kind: "zone" as const, id: z.id, name: z.name, zIndex: z.zIndex || 0, isHidden: !!z.isHidden, isLocked: !!z.isLocked })),
+                    ...currentLayoutObjects.map(o => ({ kind: "object" as const, id: o.id, name: o.name || o.type, zIndex: o.zIndex || 0, isHidden: !!o.isHidden, isLocked: !!o.isLocked }))
+                  ]
+                    .sort((a, b) => b.zIndex - a.zIndex)
+                    .map(item => (
+                      <div
+                        key={`${item.kind}-${item.id}`}
+                        onClick={() => setSelectedElement({ type: item.kind, id: item.id })}
+                        className={`flex items-center justify-between gap-1 px-2.5 py-1.5 cursor-pointer hover:bg-slate-50 ${
+                          selectedElement?.type === item.kind && selectedElement.id === item.id ? "bg-blue-50" : ""
+                        }`}
+                      >
+                        <span className={`text-[11px] font-semibold truncate flex-1 ${item.isHidden ? "text-slate-300 italic" : "text-slate-700"}`}>
+                          {item.kind === "zone" ? "▭ " : "▪ "}{item.name}
+                        </span>
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (item.kind === "zone") {
+                                onUpdateZones(zones.map(z => z.id === item.id ? { ...z, zIndex: (z.zIndex || 0) + 1 } : z));
+                              } else if (onUpdateLayoutObjects) {
+                                onUpdateLayoutObjects(layoutObjects.map(o => o.id === item.id ? { ...o, zIndex: (o.zIndex || 0) + 1 } : o));
+                              }
+                            }}
+                            title="Bring forward"
+                            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded cursor-pointer"
+                          >
+                            <ChevronDown size={11} className="rotate-180" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (item.kind === "zone") {
+                                onUpdateZones(zones.map(z => z.id === item.id ? { ...z, zIndex: (z.zIndex || 0) - 1 } : z));
+                              } else if (onUpdateLayoutObjects) {
+                                onUpdateLayoutObjects(layoutObjects.map(o => o.id === item.id ? { ...o, zIndex: (o.zIndex || 0) - 1 } : o));
+                              }
+                            }}
+                            title="Send backward"
+                            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded cursor-pointer"
+                          >
+                            <ChevronDown size={11} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (item.kind === "zone") {
+                                onUpdateZones(zones.map(z => z.id === item.id ? { ...z, isLocked: !z.isLocked } : z));
+                              } else if (onUpdateLayoutObjects) {
+                                onUpdateLayoutObjects(layoutObjects.map(o => o.id === item.id ? { ...o, isLocked: !o.isLocked } : o));
+                              }
+                            }}
+                            title={item.isLocked ? "Unlock" : "Lock"}
+                            className={`p-1 rounded cursor-pointer ${item.isLocked ? "text-amber-600 hover:bg-amber-50" : "text-slate-400 hover:text-amber-600 hover:bg-amber-50"}`}
+                          >
+                            <Lock size={11} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (item.kind === "zone") {
+                                onUpdateZones(zones.map(z => z.id === item.id ? { ...z, isHidden: !z.isHidden } : z));
+                              } else if (onUpdateLayoutObjects) {
+                                onUpdateLayoutObjects(layoutObjects.map(o => o.id === item.id ? { ...o, isHidden: !o.isHidden } : o));
+                              }
+                            }}
+                            title={item.isHidden ? "Show" : "Hide"}
+                            className={`p-1 rounded cursor-pointer ${item.isHidden ? "text-slate-300 hover:bg-slate-50" : "text-slate-500 hover:text-blue-600 hover:bg-blue-50"}`}
+                          >
+                            <Eye size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  {currentZones.length === 0 && currentLayoutObjects.length === 0 && (
+                    <p className="text-[11px] text-slate-400 text-center py-4">No zones or objects on this floor yet.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div 
               style={{
                 transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
@@ -3680,6 +3906,36 @@ export default function FloorMapDesigner({
                 bottom: 0
               }}
             >
+              {/* CAD Measurement Line Overlay */}
+              {measurePoints.length > 0 && (
+                <svg className="absolute top-0 left-0 pointer-events-none z-50" style={{ width: "6000px", height: "6000px", overflow: "visible" }}>
+                  {measurePoints[0] && measurePoints[1] && (
+                    <line
+                      x1={measurePoints[0].x} y1={measurePoints[0].y}
+                      x2={measurePoints[1].x} y2={measurePoints[1].y}
+                      stroke="#2563eb" strokeWidth={2 / zoom} strokeDasharray={`${6 / zoom} ${4 / zoom}`}
+                    />
+                  )}
+                  {measurePoints.map((p, i) => (
+                    <circle key={i} cx={p.x} cy={p.y} r={5 / zoom} fill="#2563eb" stroke="white" strokeWidth={1.5 / zoom} />
+                  ))}
+                  {measurePoints[0] && measurePoints[1] && (() => {
+                    const dx = measurePoints[1].x - measurePoints[0].x;
+                    const dy = measurePoints[1].y - measurePoints[0].y;
+                    const distFeet = Math.sqrt(dx * dx + dy * dy) / PIXELS_PER_FOOT;
+                    const midX = (measurePoints[0].x + measurePoints[1].x) / 2;
+                    const midY = (measurePoints[0].y + measurePoints[1].y) / 2;
+                    return (
+                      <foreignObject x={midX - 40} y={midY - 30 / zoom} width={80} height={24} style={{ overflow: "visible" }}>
+                        <div style={{ transform: `scale(${1 / zoom})`, transformOrigin: "center" }} className="bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-lg shadow-lg text-center whitespace-nowrap">
+                          {distFeet.toFixed(1)} ft
+                        </div>
+                      </foreignObject>
+                    );
+                  })()}
+                </svg>
+              )}
+
               {/* Marquee Selection Box Overlay */}
               {isMarqueeSelecting && marqueeStart && marqueeEnd && (
                 <div 
@@ -3695,17 +3951,19 @@ export default function FloorMapDesigner({
               )}
 
               {/* Draw current Floor Zones */}
-              {currentZones.map((zone) => {
+              {currentZones.filter(z => !z.isHidden).map((zone) => {
                 const isSelected = selectedElement?.type === "zone" && selectedElement.id === zone.id;
                 const isDeptSearchMatch = matchingDepartmentZoneIds.has(zone.id);
                 const isDeptSearchActive = departmentSearchQuery.trim() !== "";
+                const isZoneLocked = !!zone.isLocked;
                 return (
                   <div 
                     key={zone.id}
                     data-draggable="true"
-                    onMouseDown={(e) => startDragElement(e, "zone", zone.id, zone.x, zone.y)}
+                    onMouseDown={(e) => { if (isZoneLocked) return; startDragElement(e, "zone", zone.id, zone.x, zone.y); }}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
+                      if (isZoneLocked) return;
                       setEditingZoneModal(zone);
                     }}
                     style={{
@@ -3716,9 +3974,11 @@ export default function FloorMapDesigner({
                       height: `${zone.height}px`,
                       borderColor: zone.color,
                       backgroundColor: `${zone.color}0c`,
-                      opacity: isDeptSearchActive && !isDeptSearchMatch ? 0.35 : 1
+                      opacity: isDeptSearchActive && !isDeptSearchMatch ? 0.35 : 1,
+                      zIndex: zone.zIndex || 0,
+                      cursor: isZoneLocked ? "not-allowed" : undefined
                     }}
-                    className={`border-2 rounded-2xl flex flex-col justify-between p-3.5 cursor-move transition-all group ${
+                    className={`border-2 rounded-2xl flex flex-col justify-between p-3.5 transition-all group ${isZoneLocked ? "cursor-not-allowed" : "cursor-move"} ${
                       isSelected ? "ring-2 ring-blue-600 shadow-xl border-solid z-20" 
                         : isDeptSearchMatch ? "ring-2 ring-indigo-500 shadow-xl border-solid z-10 animate-pulse" 
                         : "border-dashed hover:border-solid hover:bg-slate-400/5 z-0"
@@ -3892,15 +4152,17 @@ export default function FloorMapDesigner({
               })}
 
               {/* Draw Layout Objects / Facilities */}
-              {currentLayoutObjects.map((obj) => {
+              {currentLayoutObjects.filter(o => !o.isHidden).map((obj) => {
                 const isSelected = selectedElement?.type === "object" && selectedElement.id === obj.id;
+                const isObjLocked = !!obj.isLocked;
                 return (
                   <div 
                     key={obj.id}
                     data-draggable="true"
-                    onMouseDown={(e) => startDragElement(e, "object", obj.id, obj.x, obj.y)}
+                    onMouseDown={(e) => { if (isObjLocked) return; startDragElement(e, "object", obj.id, obj.x, obj.y); }}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
+                      if (isObjLocked) return;
                       setEditingObjectModal(obj);
                     }}
                     style={{
@@ -3910,9 +4172,11 @@ export default function FloorMapDesigner({
                       width: `${obj.width}px`,
                       height: `${obj.height}px`,
                       backgroundColor: obj.color,
-                      transform: `rotate(${obj.rotation}deg)`
+                      transform: `rotate(${obj.rotation}deg)`,
+                      zIndex: obj.zIndex || 0,
+                      cursor: isObjLocked ? "not-allowed" : undefined
                     }}
-                    className={`rounded-xl border border-slate-300 p-2 text-center flex flex-col items-center justify-center cursor-move transition-all ${
+                    className={`rounded-xl border border-slate-300 p-2 text-center flex flex-col items-center justify-center transition-all ${isObjLocked ? "cursor-not-allowed" : "cursor-move"} ${
                       isSelected ? "ring-2 ring-purple-600 border-solid z-30 shadow-lg" : "hover:border-purple-400"
                     }`}
                   >
@@ -4041,6 +4305,15 @@ export default function FloorMapDesigner({
                   }
                 }
 
+                let vacantHighlightStyle = "";
+                if (showVacantOnly) {
+                  if (seat.status === "Vacant") {
+                    vacantHighlightStyle = "ring-4 ring-emerald-500 border-emerald-600 bg-emerald-200/90 scale-110 z-40 shadow-xl animate-pulse";
+                  } else if (!isFilteringManager && !isDeptSearchActive) {
+                    vacantHighlightStyle = "opacity-25 grayscale";
+                  }
+                }
+
                 const bName = currentBuilding?.name || "Newmark _Hyderabad";
                 const fName = currentFloor?.name || "11 th Floor CRE";
                 const mgrName = seat.allocatedManager || seat.managerName || (seat.employeeName ? seat.employeeName : "Unassigned Manager");
@@ -4058,7 +4331,7 @@ export default function FloorMapDesigner({
                       top: `${seat.y}px`,
                       transform: `rotate(${seat.rotation || 0}deg)`
                     }}
-                    className={`w-11 h-11 border-2 rounded-xl flex flex-col items-center justify-center cursor-move shadow-2xs text-[9px] font-bold transition-all relative ${statusBorder} ${managerHighlightStyle} ${deptHighlightStyle} ${
+                    className={`w-11 h-11 border-2 rounded-xl flex flex-col items-center justify-center cursor-move shadow-2xs text-[9px] font-bold transition-all relative ${statusBorder} ${managerHighlightStyle} ${deptHighlightStyle} ${vacantHighlightStyle} ${
                       isGroupSelected 
                         ? "ring-2 ring-blue-600 ring-offset-1 border-blue-600 bg-blue-100/90 scale-105 z-30 shadow-md" 
                         : isSingleSelected 

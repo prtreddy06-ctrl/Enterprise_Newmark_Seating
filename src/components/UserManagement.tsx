@@ -19,7 +19,9 @@ import {
   QrCode,
   Download,
   Send,
-  FileText
+  FileText,
+  Layers,
+  Trash
 } from "lucide-react";
 import { UserAccount, UserRole, Seat } from "../types";
 import { dispatchEmailNotification, openMailClient, downloadEMLEmail } from "../utils/emailAndDownloadService";
@@ -34,6 +36,7 @@ interface UserManagementProps {
   onBulkDeleteUsers?: (userIds: string[]) => void;
   onAddAuditLog: (action: string, category: any, details: string) => void;
   onBulkAddEmployeesAndUsers?: (newUsers: UserAccount[], newEmps: any[]) => void;
+  onUpdateSeats?: (updatedSeats: Seat[]) => void;
 }
 
 export default function UserManagement({
@@ -44,12 +47,18 @@ export default function UserManagement({
   onUpdateUser,
   onDeleteUser,
   onBulkDeleteUsers,
-  onAddAuditLog
+  onAddAuditLog,
+  onBulkAddEmployeesAndUsers,
+  onUpdateSeats
 }: UserManagementProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterRole, setFilterRole] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [isManageDeptOpen, setIsManageDeptOpen] = useState(false);
+  const [deptDeleteConfirm, setDeptDeleteConfirm] = useState<string | null>(null);
+  const [deptRenameTarget, setDeptRenameTarget] = useState<string | null>(null);
+  const [deptRenameValue, setDeptRenameValue] = useState("");
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -85,6 +94,63 @@ export default function UserManagement({
     list.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
     return list.length > 0 ? list : ["Corporate Infrastructure", "Operations"];
   }, [users, seats]);
+
+  // Department usage counts — lets an admin see exactly what's tied to a department before removing it
+  const departmentStats = useMemo(() => {
+    return availableDepartments.map(dept => {
+      const userCount = users.filter(u => (u.department || "").trim().toLowerCase() === dept.toLowerCase()).length;
+      const seatCount = (seats || []).filter(s => 
+        (s.department || "").trim().toLowerCase() === dept.toLowerCase() ||
+        (s.allocatedDepartment || "").trim().toLowerCase() === dept.toLowerCase()
+      ).length;
+      return { name: dept, userCount, seatCount, total: userCount + seatCount };
+    });
+  }, [availableDepartments, users, seats]);
+
+  const handleDeleteDepartment = (deptName: string) => {
+    // Clear this department off every user record that references it
+    users.filter(u => (u.department || "").trim().toLowerCase() === deptName.toLowerCase())
+      .forEach(u => onUpdateUser({ ...u, department: "" }));
+
+    // Clear it off every seat record too (department + allocatedDepartment fields), freeing the seat back to Vacant
+    if (onUpdateSeats && seats) {
+      const updatedSeats = seats.map(s => {
+        let changed = false;
+        const next = { ...s };
+        if ((s.department || "").trim().toLowerCase() === deptName.toLowerCase()) { next.department = ""; changed = true; }
+        if ((s.allocatedDepartment || "").trim().toLowerCase() === deptName.toLowerCase()) { next.allocatedDepartment = ""; changed = true; }
+        return changed ? next : s;
+      });
+      onUpdateSeats(updatedSeats);
+    }
+
+    onAddAuditLog("Delete Department", "User Administration", `Removed department "${deptName}" and cleared it from all linked users and seats.`);
+    setDeptDeleteConfirm(null);
+  };
+
+  const handleRenameDepartment = (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed.toLowerCase() === oldName.toLowerCase()) { setDeptRenameTarget(null); return; }
+
+    users.filter(u => (u.department || "").trim().toLowerCase() === oldName.toLowerCase())
+      .forEach(u => onUpdateUser({ ...u, department: trimmed }));
+
+    if (onUpdateSeats && seats) {
+      const updatedSeats = seats.map(s => {
+        let changed = false;
+        const next = { ...s };
+        if ((s.department || "").trim().toLowerCase() === oldName.toLowerCase()) { next.department = trimmed; changed = true; }
+        if ((s.allocatedDepartment || "").trim().toLowerCase() === oldName.toLowerCase()) { next.allocatedDepartment = trimmed; changed = true; }
+        return changed ? next : s;
+      });
+      onUpdateSeats(updatedSeats);
+    }
+
+    onAddAuditLog("Rename Department", "User Administration", `Renamed department "${oldName}" to "${trimmed}" across all linked users and seats.`);
+    setDeptRenameTarget(null);
+    setDeptRenameValue("");
+  };
+
 
   const filteredUsers = users.filter(u => {
     const matchesSearch = 
@@ -313,15 +379,97 @@ Temporary Password: ${tempPass}`,
         </div>
 
         {isAuthorized && (
-          <button
-            onClick={handleOpenAddModal}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-xl font-bold shadow-md shadow-blue-200 flex items-center gap-1.5 transition-all"
-          >
-            <UserPlus size={15} />
-            <span>Create New User</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsManageDeptOpen(true)}
+              className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all"
+            >
+              <Layers size={15} className="text-blue-600" />
+              <span>Manage Departments</span>
+            </button>
+            <button
+              onClick={handleOpenAddModal}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-xl font-bold shadow-md shadow-blue-200 flex items-center gap-1.5 transition-all"
+            >
+              <UserPlus size={15} />
+              <span>Create New User</span>
+            </button>
+          </div>
         )}
       </div>
+
+      {/* MANAGE DEPARTMENTS MODAL */}
+      {isManageDeptOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-200 max-h-[85vh] flex flex-col">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <div>
+                <h3 className="text-sm font-bold text-slate-800 font-display">Manage Departments</h3>
+                <p className="text-[11px] text-slate-400">Rename or remove departments — including leftover test/demo entries — across all users and seats.</p>
+              </div>
+              <button onClick={() => setIsManageDeptOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg font-bold cursor-pointer">×</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
+              {departmentStats.map(dept => (
+                <div key={dept.name} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  {deptRenameTarget === dept.name ? (
+                    <div className="flex items-center gap-2 flex-1">
+                      <input
+                        autoFocus
+                        value={deptRenameValue}
+                        onChange={(e) => setDeptRenameValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleRenameDepartment(dept.name, deptRenameValue); if (e.key === "Escape") setDeptRenameTarget(null); }}
+                        className="flex-1 p-1.5 border border-blue-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <button onClick={() => handleRenameDepartment(dept.name, deptRenameValue)} className="text-[10px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg cursor-pointer">Save</button>
+                      <button onClick={() => setDeptRenameTarget(null)} className="text-[10px] font-bold text-slate-500 hover:text-slate-700 px-2 cursor-pointer">Cancel</button>
+                    </div>
+                  ) : deptDeleteConfirm === dept.name ? (
+                    <div className="flex items-center justify-between flex-1">
+                      <span className="text-[11px] font-semibold text-rose-600">Remove "{dept.name}" from {dept.total} record(s)?</span>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => handleDeleteDepartment(dept.name)} className="text-[10px] font-bold text-white bg-rose-600 hover:bg-rose-700 px-2.5 py-1.5 rounded-lg cursor-pointer">Confirm</button>
+                        <button onClick={() => setDeptDeleteConfirm(null)} className="text-[10px] font-bold text-slate-500 hover:text-slate-700 px-2 cursor-pointer">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <p className="text-xs font-bold text-slate-800">{dept.name}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{dept.userCount} user(s) • {dept.seatCount} seat record(s)</p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => { setDeptRenameTarget(dept.name); setDeptRenameValue(dept.name); }}
+                          title="Rename department"
+                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer"
+                        >
+                          <Edit3 size={13} />
+                        </button>
+                        <button
+                          onClick={() => setDeptDeleteConfirm(dept.name)}
+                          title="Remove department"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                        >
+                          <Trash size={13} />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+              {departmentStats.length === 0 && (
+                <p className="text-xs text-slate-400 text-center py-6">No departments found yet.</p>
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setIsManageDeptOpen(false)} className="px-4 py-2 border border-slate-200 text-slate-600 text-xs rounded-xl font-semibold hover:bg-slate-50 cursor-pointer">Done</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">

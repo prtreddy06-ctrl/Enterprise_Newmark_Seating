@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { UserRole, Building, Floor, Zone, Seat, SeatRequest, CheckInLog, AuditLog, ITAsset, EmployeeProfile, UserAccount, LocationSite, AiReaderCopy, LayoutObject } from "./types";
+import { UserRole, Building, Floor, Zone, Seat, SeatRequest, CheckInLog, AuditLog, ITAsset, EmployeeProfile, UserAccount, LocationSite, AiReaderCopy, LayoutObject, Organization } from "./types";
 import { 
   initialSites,
   initialBuildings, 
@@ -16,11 +16,14 @@ import {
   initialAuditLogs,
   initialEmployees,
   initialUsers,
-  initialAssets
+  initialAssets,
+  initialOrganizations,
+  DEFAULT_ORG_ID
 } from "./data/initialData";
 
 import Header from "./components/Header";
 import LoginPortal from "./components/LoginPortal";
+import SignUpPortal from "./components/SignUpPortal";
 import ResetPasswordScreen from "./components/ResetPasswordScreen";
 import EmailToastAndModal from "./components/EmailToastAndModal";
 import UserProfileModal from "./components/UserProfileModal";
@@ -269,6 +272,7 @@ export default function App() {
   });
   const [sessionExpiredNotice, setSessionExpiredNotice] = useState<boolean>(false);
   const lastActivityRef = useRef<number>(Date.now());
+  const [authView, setAuthView] = useState<"login" | "signup">("login");
 
   const [activeRole, setActiveRole] = useState<UserRole>(UserRole.SUPER_USER);
 
@@ -286,6 +290,32 @@ export default function App() {
   const [checkInLogs, setCheckInLogs] = useState<CheckInLog[]>(() => loadStorage('checkInLogs', initialCheckInLogs));
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadStorage('auditLogs', initialAuditLogs));
   const [assets, setAssets] = useState<ITAsset[]>(() => loadStorage('assets', initialAssets));
+  const [organizations, setOrganizations] = useState<Organization[]>(() => loadStorage('organizations', initialOrganizations));
+
+  // The workspace (company) the current session belongs to. Falls back to the
+  // original default workspace for legacy sessions/data created before
+  // multi-tenancy existed.
+  const myOrgId = currentUser?.organizationId || DEFAULT_ORG_ID;
+  const belongsToMyOrg = (item: { organizationId?: string }) => (item.organizationId || DEFAULT_ORG_ID) === myOrgId;
+
+  const currentOrganization = organizations.find(o => o.id === myOrgId) || organizations[0] || initialOrganizations[0];
+
+  // Every screen in the app reads these *InOrg arrays instead of the raw state above,
+  // so one company's users never see another company's sites/floors/seats/etc.
+  // Raw setters (setSites, setSeats, ...) still operate on the full cross-tenant
+  // array — new records are stamped with organizationId at creation time below.
+  const sitesInOrg = sites.filter(belongsToMyOrg);
+  const buildingsInOrg = buildings.filter(belongsToMyOrg);
+  const floorsInOrg = floors.filter(belongsToMyOrg);
+  const zonesInOrg = zones.filter(belongsToMyOrg);
+  const seatsInOrg = seats.filter(belongsToMyOrg);
+  const layoutObjectsInOrg = layoutObjects.filter(belongsToMyOrg);
+  const employeesInOrg = employees.filter(belongsToMyOrg);
+  const usersInOrg = users.filter(belongsToMyOrg);
+  const assetsInOrg = assets.filter(belongsToMyOrg);
+  const requestsInOrg = requests.filter(belongsToMyOrg);
+  const checkInLogsInOrg = checkInLogs.filter(belongsToMyOrg);
+  const auditLogsInOrg = auditLogs.filter(belongsToMyOrg);
 
   const handleSelectSite = (siteId: string) => {
     setActiveSiteId(siteId);
@@ -296,11 +326,13 @@ export default function App() {
     }
   };
 
-  const handleAddNewSite = (newSite: LocationSite, initialBuildingName?: string) => {
-    const updatedSites = [...sites, newSite];
+  const handleAddNewSite = (newSite: LocationSite, initialBuildingName?: string, targetOrgId?: string) => {
+    const orgIdForNewSite = targetOrgId || myOrgId;
+    const stampedSite = { ...newSite, organizationId: orgIdForNewSite };
+    const updatedSites = [...sites, stampedSite];
     setSites(updatedSites);
     localStorage.setItem("enterprizseat_sites", JSON.stringify(updatedSites));
-    saveFirestoreDoc("sites", newSite);
+    saveFirestoreDoc("sites", stampedSite);
 
     // Create default building for this new site
     const newBuildingId = `b-${Date.now()}`;
@@ -309,7 +341,8 @@ export default function App() {
       name: initialBuildingName || `${newSite.name} Primary Tower`,
       location: `${newSite.address}`,
       floorsCount: 1,
-      siteId: newSite.id
+      siteId: newSite.id,
+      organizationId: orgIdForNewSite
     };
 
     const updatedBuildings = [...buildings, newBuilding];
@@ -326,7 +359,8 @@ export default function App() {
       capacity: 50,
       zonesCount: 2,
       isArchived: false,
-      lastModified: new Date().toISOString().split("T")[0]
+      lastModified: new Date().toISOString().split("T")[0],
+      organizationId: orgIdForNewSite
     };
     const updatedFloors = [...floors, newFloor];
     setFloors(updatedFloors);
@@ -667,6 +701,13 @@ export default function App() {
       }
     }, loadCleanUsers());
 
+    const unsubOrganizations = subscribeToCollection<Organization>("organizations", (items) => {
+      if (isMounted && Array.isArray(items)) {
+        setOrganizations(items);
+        setEncryptedStorage('organizations', items);
+      }
+    }, initialOrganizations);
+
     const unsubEmployees = subscribeToCollection<EmployeeProfile>("employees", (items) => {
       if (isMounted && Array.isArray(items)) {
         setEmployees(items);
@@ -771,6 +812,7 @@ export default function App() {
     return () => {
       isMounted = false;
       unsubUsers();
+      unsubOrganizations();
       unsubEmployees();
       unsubBuildings();
       unsubFloors();
@@ -820,9 +862,16 @@ export default function App() {
 
   // State mutator functions
   const handleUpdateFloors = (updatedFloors: Floor[]) => {
+    // updatedFloors is the desired full state for MY org's floors only (child components
+    // only ever see floorsInOrg). Merge that against other orgs' floors untouched, so
+    // editing/deleting floors in one company's workspace can never affect another's.
+    const stampedUpdatedFloors = updatedFloors.map(f => ({ ...f, organizationId: f.organizationId || myOrgId }));
+    const otherOrgFloors = floors.filter(f => !belongsToMyOrg(f));
+
     setFloors(prevFloors => {
-      const updatedIds = new Set(updatedFloors.map(f => f.id));
-      const deletedFloors = prevFloors.filter(f => !updatedIds.has(f.id));
+      const myPrevFloors = prevFloors.filter(belongsToMyOrg);
+      const updatedIds = new Set(stampedUpdatedFloors.map(f => f.id));
+      const deletedFloors = myPrevFloors.filter(f => !updatedIds.has(f.id));
 
       deletedFloors.forEach(df => {
         console.log(`[Firestore Sync] Deleting floor doc ${df.id} (${df.name}) from Firestore`);
@@ -849,71 +898,88 @@ export default function App() {
         });
       });
 
-      updatedFloors.forEach(f => saveFirestoreDoc("floors", f));
+      stampedUpdatedFloors.forEach(f => saveFirestoreDoc("floors", f));
+
+      const nextFloors = [...otherOrgFloors, ...stampedUpdatedFloors];
 
       try {
-        localStorage.setItem('enterprizseat_floors', JSON.stringify(updatedFloors));
+        localStorage.setItem('enterprizseat_floors', JSON.stringify(nextFloors));
       } catch (e) {
         console.error("Failed to write floors to localStorage", e);
       }
 
-      return updatedFloors;
+      return nextFloors;
     });
 
     logAuditAction("Update Floors", "Infrastructure", `Updated floor list layout matrix.`);
   };
 
   const handleUpdateBuildings = (updatedBuildings: Building[]) => {
+    const stampedUpdatedBuildings = updatedBuildings.map(b => ({ ...b, organizationId: b.organizationId || myOrgId }));
+    const otherOrgBuildings = buildings.filter(b => !belongsToMyOrg(b));
+
     setBuildings(prevBuildings => {
-      const updatedIds = new Set(updatedBuildings.map(b => b.id));
-      const deletedBuildings = prevBuildings.filter(b => !updatedIds.has(b.id));
+      const myPrevBuildings = prevBuildings.filter(belongsToMyOrg);
+      const updatedIds = new Set(stampedUpdatedBuildings.map(b => b.id));
+      const deletedBuildings = myPrevBuildings.filter(b => !updatedIds.has(b.id));
 
       if (deletedBuildings.length > 0) {
         deleteFirestoreBatch("buildings", deletedBuildings.map(b => b.id));
       }
 
-      saveFirestoreBatch("buildings", updatedBuildings);
+      saveFirestoreBatch("buildings", stampedUpdatedBuildings);
+
+      const nextBuildings = [...otherOrgBuildings, ...stampedUpdatedBuildings];
 
       try {
-        localStorage.setItem('enterprizseat_buildings', JSON.stringify(updatedBuildings));
+        localStorage.setItem('enterprizseat_buildings', JSON.stringify(nextBuildings));
       } catch (e) {
         console.error("Failed to write buildings to localStorage", e);
       }
 
-      return updatedBuildings;
+      return nextBuildings;
     });
 
     logAuditAction("Update Buildings", "Infrastructure", `Updated building infrastructure list.`);
   };
 
   const handleUpdateZones = (updatedZones: Zone[]) => {
+    const stampedUpdatedZones = updatedZones.map(z => ({ ...z, organizationId: z.organizationId || myOrgId }));
+    const otherOrgZones = zones.filter(z => !belongsToMyOrg(z));
+
     setZones(prevZones => {
-      const updatedIds = new Set(updatedZones.map(z => z.id));
-      const deletedZoneIds = prevZones.filter(z => !updatedIds.has(z.id)).map(z => z.id);
+      const myPrevZones = prevZones.filter(belongsToMyOrg);
+      const updatedIds = new Set(stampedUpdatedZones.map(z => z.id));
+      const deletedZoneIds = myPrevZones.filter(z => !updatedIds.has(z.id)).map(z => z.id);
       if (deletedZoneIds.length > 0) {
         deleteFirestoreBatch("zones", deletedZoneIds);
       }
-      saveFirestoreBatch("zones", updatedZones);
-      return updatedZones;
+      saveFirestoreBatch("zones", stampedUpdatedZones);
+      const nextZones = [...otherOrgZones, ...stampedUpdatedZones];
+      try {
+        localStorage.setItem('enterprizseat_zones', JSON.stringify(nextZones));
+      } catch (e) {
+        console.error("Failed to write zones to localStorage", e);
+      }
+      return nextZones;
     });
-    try {
-      localStorage.setItem('enterprizseat_zones', JSON.stringify(updatedZones));
-    } catch (e) {
-      console.error("Failed to write zones to localStorage", e);
-    }
     logAuditAction("Update Zones", "Zone/Seat", `Modified spatial zone matrix on Floor Designer.`);
   };
 
   const handleUpdateSeats = (updatedSeats: Seat[]) => {
+    const stampedUpdatedSeats = updatedSeats.map(s => ({ ...s, organizationId: s.organizationId || myOrgId }));
+    const otherOrgSeats = seats.filter(s => !belongsToMyOrg(s));
+
     setSeats(prevSeats => {
-      const prevMap = new Map(prevSeats.map(p => [p.id, p]));
-      const updatedIds = new Set(updatedSeats.map(s => s.id));
-      const deletedSeatIds = prevSeats.filter(s => !updatedIds.has(s.id)).map(s => s.id);
+      const myPrevSeats = prevSeats.filter(belongsToMyOrg);
+      const prevMap = new Map(myPrevSeats.map(p => [p.id, p]));
+      const updatedIds = new Set(stampedUpdatedSeats.map(s => s.id));
+      const deletedSeatIds = myPrevSeats.filter(s => !updatedIds.has(s.id)).map(s => s.id);
       if (deletedSeatIds.length > 0) {
         deleteFirestoreBatch("seats", deletedSeatIds);
       }
 
-      const changedSeats = updatedSeats.filter(s => {
+      const changedSeats = stampedUpdatedSeats.filter(s => {
         const prev = prevMap.get(s.id);
         if (!prev) return true;
         return JSON.stringify(prev) !== JSON.stringify(s);
@@ -922,14 +988,15 @@ export default function App() {
       if (changedSeats.length > 0) {
         saveFirestoreBatch("seats", changedSeats);
       }
-      return updatedSeats;
+      return [...otherOrgSeats, ...stampedUpdatedSeats];
     });
     try {
-      localStorage.setItem('enterprizseat_seats', JSON.stringify(updatedSeats));
+      localStorage.setItem('enterprizseat_seats', JSON.stringify([...otherOrgSeats, ...stampedUpdatedSeats]));
     } catch (e) {
       console.error("Failed to write seats to localStorage", e);
     }
   };
+
 
   const handleCommitBulkSeats = (bulkSeats: Seat[], targetFloorId?: string) => {
     let changedSeatsList: Seat[] = [];
@@ -1000,15 +1067,19 @@ export default function App() {
   };
 
   const handleUpdateLayoutObjects = (updatedObjects: LayoutObject[]) => {
+    const stampedUpdatedObjects = updatedObjects.map(o => ({ ...o, organizationId: o.organizationId || myOrgId }));
+    const otherOrgObjects = layoutObjects.filter(o => !belongsToMyOrg(o));
+
     setLayoutObjects(prevObjects => {
-      const prevMap = new Map(prevObjects.map(p => [p.id, p]));
-      const updatedIds = new Set(updatedObjects.map(o => o.id));
-      const deletedIds = prevObjects.filter(o => !updatedIds.has(o.id)).map(o => o.id);
+      const myPrevObjects = prevObjects.filter(belongsToMyOrg);
+      const prevMap = new Map(myPrevObjects.map(p => [p.id, p]));
+      const updatedIds = new Set(stampedUpdatedObjects.map(o => o.id));
+      const deletedIds = myPrevObjects.filter(o => !updatedIds.has(o.id)).map(o => o.id);
       if (deletedIds.length > 0) {
         deleteFirestoreBatch("layoutObjects", deletedIds);
       }
 
-      const changedObjects = updatedObjects.filter(o => {
+      const changedObjects = stampedUpdatedObjects.filter(o => {
         const prev = prevMap.get(o.id);
         if (!prev) return true;
         return JSON.stringify(prev) !== JSON.stringify(o);
@@ -1017,18 +1088,20 @@ export default function App() {
       if (changedObjects.length > 0) {
         saveFirestoreBatch("layoutObjects", changedObjects);
       }
-      return updatedObjects;
+      return [...otherOrgObjects, ...stampedUpdatedObjects];
     });
     try {
-      localStorage.setItem('enterprizseat_layout_objects', JSON.stringify(updatedObjects));
+      localStorage.setItem('enterprizseat_layout_objects', JSON.stringify([...otherOrgObjects, ...stampedUpdatedObjects]));
     } catch (e) {
       console.error("Failed to write layoutObjects to localStorage", e);
     }
   };
 
+
   const handleAddRequest = (newRequest: SeatRequest) => {
-    setRequests(prev => [newRequest, ...prev]);
-    saveFirestoreDoc("requests", newRequest);
+    const stampedRequest = { ...newRequest, organizationId: newRequest.organizationId || myOrgId };
+    setRequests(prev => [stampedRequest, ...prev]);
+    saveFirestoreDoc("requests", stampedRequest);
     logAuditAction("Submit Seat Request", "Seat Allocation", `Employee ${newRequest.employeeName} submitted a seat request.`);
   };
 
@@ -1153,20 +1226,24 @@ export default function App() {
   };
 
   const handleAddAssets = (newAssets: ITAsset[]) => {
-    setAssets(prev => [...newAssets, ...prev]);
-    newAssets.forEach(a => saveFirestoreDoc("assets", a));
+    const stampedAssets = newAssets.map(a => ({ ...a, organizationId: a.organizationId || myOrgId }));
+    setAssets(prev => [...stampedAssets, ...prev]);
+    stampedAssets.forEach(a => saveFirestoreDoc("assets", a));
     logAuditAction("Add IT Assets", "IT Asset", `Injected ${newAssets.length} IT assets into central registry.`);
   };
 
   const handleUpdateAssets = (updatedAssets: ITAsset[]) => {
-    setAssets(updatedAssets);
-    updatedAssets.forEach(a => saveFirestoreDoc("assets", a));
+    const stampedUpdatedAssets = updatedAssets.map(a => ({ ...a, organizationId: a.organizationId || myOrgId }));
+    const otherOrgAssets = assets.filter(a => !belongsToMyOrg(a));
+    setAssets([...otherOrgAssets, ...stampedUpdatedAssets]);
+    stampedUpdatedAssets.forEach(a => saveFirestoreDoc("assets", a));
     logAuditAction("Update IT Assets", "IT Asset", `Updated IT asset state matrix.`);
   };
 
   const handleAddUser = (user: UserAccount) => {
-    saveFirestoreDoc("users", user);
-    setUsers(prev => [user, ...prev]);
+    const stampedUser = { ...user, organizationId: user.organizationId || myOrgId };
+    saveFirestoreDoc("users", stampedUser);
+    setUsers(prev => [stampedUser, ...prev]);
 
     // Automatically create matching Employee Profile in Employee Directory
     const newEmpProfile: EmployeeProfile = {
@@ -1174,7 +1251,7 @@ export default function App() {
       name: user.name,
       email: user.email,
       department: user.department || "Unassigned",
-      company: "Global Cyber Systems",
+      company: currentOrganization?.name || "Global Cyber Systems",
       manager: "Raviteja Reddy palagiri",
       floor: "11 th Floor CRE",
       zone: "Zone A (Cloud Platform)",
@@ -1184,7 +1261,8 @@ export default function App() {
       assignedAssets: [],
       accountStatus: user.status === "Active" ? "Active" : user.status === "Locked" ? "Locked" : "Inactive",
       role: user.role,
-      lastLogin: user.lastLogin
+      lastLogin: user.lastLogin,
+      organizationId: stampedUser.organizationId
     };
 
     saveFirestoreDoc("employees", newEmpProfile);
@@ -1195,18 +1273,21 @@ export default function App() {
   };
 
   const handleBulkAddEmployeesAndUsers = (newUsers: UserAccount[], newEmps: EmployeeProfile[]) => {
-    newUsers.forEach(u => saveFirestoreDoc("users", u));
-    newEmps.forEach(e => saveFirestoreDoc("employees", e));
+    const stampedNewUsers = newUsers.map(u => ({ ...u, organizationId: u.organizationId || myOrgId }));
+    const stampedNewEmps = newEmps.map(e => ({ ...e, organizationId: e.organizationId || myOrgId }));
+
+    stampedNewUsers.forEach(u => saveFirestoreDoc("users", u));
+    stampedNewEmps.forEach(e => saveFirestoreDoc("employees", e));
 
     setUsers(prev => {
       const existingEmails = new Set(prev.map(u => u.email.toLowerCase()));
-      const filtered = newUsers.filter(u => !existingEmails.has(u.email.toLowerCase()));
+      const filtered = stampedNewUsers.filter(u => !existingEmails.has(u.email.toLowerCase()));
       return [...filtered, ...prev];
     });
 
     setEmployees(prev => {
       const existingEmails = new Set(prev.map(e => e.email.toLowerCase()));
-      const filtered = newEmps.filter(e => !existingEmails.has(e.email.toLowerCase()));
+      const filtered = stampedNewEmps.filter(e => !existingEmails.has(e.email.toLowerCase()));
       return [...filtered, ...prev];
     });
 
@@ -1497,13 +1578,72 @@ export default function App() {
     );
   }
 
-  // Render Login Portal if not logged in
+  // Render Login Portal (or Sign-Up Portal) if not logged in
   if (!currentUser) {
+    if (authView === "signup") {
+      return (
+        <>
+          <SignUpPortal
+            existingUsers={users}
+            existingOrganizations={organizations}
+            onSwitchToLogin={() => setAuthView("login")}
+            onCreateWorkspace={(org, adminUser, starterSite) => {
+              // Persist the new organization
+              setOrganizations(prev => [...prev, org]);
+              setEncryptedStorage("organizations", [...organizations, org]);
+              saveFirestoreDoc("organizations", org);
+
+              // Persist the new Super User account, scoped to this org
+              setUsers(prev => [adminUser, ...prev]);
+              saveFirestoreDoc("users", adminUser);
+
+              // Create a starter Employee Profile for the admin
+              const adminEmpProfile: EmployeeProfile = {
+                id: `emp-${adminUser.id}`,
+                name: adminUser.name,
+                email: adminUser.email,
+                department: adminUser.department || "Leadership",
+                company: org.name,
+                manager: "—",
+                floor: "",
+                zone: "",
+                seatNumber: "",
+                seatType: "Standard",
+                occupancyStatus: "Vacant",
+                assignedAssets: [],
+                lastLogin: adminUser.lastLogin || new Date().toISOString(),
+                accountStatus: "Active",
+                role: adminUser.role,
+                organizationId: org.id
+              };
+              setEmployees(prev => [adminEmpProfile, ...prev]);
+              saveFirestoreDoc("employees", adminEmpProfile);
+
+              // Create the starter site/building/floor for this org (empty — no seats/zones yet)
+              handleAddNewSite(starterSite, `${org.name} Primary Tower`, org.id);
+
+              logAuditAction("Create Company Workspace", "System", `New company workspace "${org.name}" created by ${adminUser.name} (${adminUser.email}).`);
+
+              // Log the admin straight into their new workspace
+              setCurrentUser(adminUser);
+              setActiveRole(adminUser.role);
+              setAuthView("login");
+              const now = Date.now();
+              lastActivityRef.current = now;
+              setEncryptedStorage("active_session", adminUser);
+              setEncryptedStorage("last_activity", now.toString());
+            }}
+          />
+          <EmailToastAndModal />
+        </>
+      );
+    }
     return (
       <>
         <LoginPortal
           registeredUsers={users}
           sessionExpiredNotice={sessionExpiredNotice}
+          onSwitchToSignUp={() => setAuthView("signup")}
           onLoginSuccess={(user) => {
             const isSuperUser = user.email.toLowerCase() === "prtreddy06@gmail.com" || user.role === UserRole.SUPER_USER;
             const finalUser = isSuperUser ? { ...user, role: UserRole.SUPER_USER } : user;
@@ -1573,15 +1713,21 @@ export default function App() {
         }`} 
         id="app-sidebar-rail"
       >
-        {/* Brand Section */}
+        {/* Brand Section — reflects the signed-in company's own branding */}
         <div className="p-4 flex items-center justify-between border-b border-slate-100">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-200">
-              <Layers size={18} />
+          <div className="flex items-center space-x-3 min-w-0">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-lg shrink-0 font-bold text-[11px]"
+              style={{ backgroundColor: currentOrganization?.primaryColor || "#1d4ed8" }}
+            >
+              {currentOrganization?.logoInitials || <Layers size={18} />}
             </div>
-            <span className="font-bold text-base tracking-tight text-slate-800 uppercase font-display">
-              Enterpriz<span className="text-blue-600">Seat</span>
-            </span>
+            <div className="min-w-0">
+              <span className="font-bold text-sm tracking-tight text-slate-800 block truncate" title={currentOrganization?.name}>
+                {currentOrganization?.name || "EnterprizSeat"}
+              </span>
+              <span className="text-[9px] text-slate-400 font-mono uppercase tracking-wide">EnterprizSeat Platform</span>
+            </div>
           </div>
           <button
             onClick={() => setIsSidebarOpen(false)}
@@ -1793,10 +1939,10 @@ export default function App() {
             logAuditAction("User Logout", "Login/Logout", `User ${logoutUserName} signed out from application.`);
           }}
           pendingRequestsCount={pendingRequestsCount} 
-          requests={requests}
+          requests={requestsInOrg}
           onSelectTab={setActiveTab}
           activeTab={activeTab}
-          sites={sites}
+          sites={sitesInOrg}
           activeSiteId={activeSiteId}
           onSelectSite={handleSelectSite}
           onOpenCreateSiteModal={() => setIsCreateSiteModalOpen(true)}
@@ -1811,16 +1957,16 @@ export default function App() {
         <main className="flex-1 p-6 lg:p-8 overflow-y-auto bg-slate-50/50" id="app-main-content-stream">
           {activeTab === "dashboard" && (
             <DashboardView 
-              seats={seats} 
-              zones={zones} 
-              requests={requests} 
-              buildings={buildings}
-              floors={floors}
-              sites={sites}
+              seats={seatsInOrg} 
+              zones={zonesInOrg} 
+              requests={requestsInOrg} 
+              buildings={buildingsInOrg}
+              floors={floorsInOrg}
+              sites={sitesInOrg}
               activeSiteId={activeSiteId}
               onSelectSite={handleSelectSite}
-              employees={employees}
-              checkInLogs={checkInLogs}
+              employees={employeesInOrg}
+              checkInLogs={checkInLogsInOrg}
               activeRole={activeRole}
               onNavigateToRequests={() => setActiveTab("workflows")} 
               onNavigateToFloorMap={() => setActiveTab("designer")} 
@@ -1830,13 +1976,13 @@ export default function App() {
 
           {activeTab === "designer" && (
             <FloorMapDesigner 
-              buildings={buildings} 
-              floors={floors} 
-              zones={zones} 
-              seats={seats} 
-              employees={employees}
-              layoutObjects={layoutObjects}
-              sites={sites}
+              buildings={buildingsInOrg} 
+              floors={floorsInOrg} 
+              zones={zonesInOrg} 
+              seats={seatsInOrg} 
+              employees={employeesInOrg}
+              layoutObjects={layoutObjectsInOrg}
+              sites={sitesInOrg}
               activeSiteId={activeSiteId}
               onUpdateZones={handleUpdateZones} 
               onUpdateSeats={handleUpdateSeats} 
@@ -1852,9 +1998,9 @@ export default function App() {
           {activeTab === "reader" && (
             <FloorReader 
               activeRole={activeRole}
-              buildings={buildings}
-              floors={floors}
-              sites={sites}
+              buildings={buildingsInOrg}
+              floors={floorsInOrg}
+              sites={sitesInOrg}
               activeSiteId={activeSiteId}
               aiReaderCopies={aiReaderCopies}
               onCommitExtractedFloor={handleCommitFloorData}
@@ -1870,21 +2016,21 @@ export default function App() {
             <ExcelUpload 
               onCommitBulkAssets={handleAddAssets}
               onCommitBulkSeats={handleCommitBulkSeats}
-              existingAssets={assets}
-              existingSeats={seats}
-              employees={employees}
+              existingAssets={assetsInOrg}
+              existingSeats={seatsInOrg}
+              employees={employeesInOrg}
               activeRole={activeRole}
               onAddAuditLog={logAuditAction}
-              floors={floors}
-              buildings={buildings}
+              floors={floorsInOrg}
+              buildings={buildingsInOrg}
             />
           )}
 
           {activeTab === "assets" && (
             <AssetManagement 
-              assets={assets}
-              seats={seats}
-              employees={employees}
+              assets={assetsInOrg}
+              seats={seatsInOrg}
+              employees={employeesInOrg}
               activeRole={activeRole}
               onAddAsset={(newAsset) => setAssets(prev => [newAsset, ...prev])}
               onUpdateAsset={(updatedAsset) => setAssets(prev => prev.map(a => a.id === updatedAsset.id ? updatedAsset : a))}
@@ -1896,9 +2042,9 @@ export default function App() {
 
           {activeTab === "directory" && (
             <EmployeeDirectory 
-              employees={employees}
-              assets={assets}
-              seats={seats}
+              employees={employeesInOrg}
+              assets={assetsInOrg}
+              seats={seatsInOrg}
               activeRole={activeRole}
               onSelectEmployeeSeat={(seatNum) => {
                 setActiveTab("designer");
@@ -1913,7 +2059,7 @@ export default function App() {
           {activeTab === "users" && (
             <UserManagement 
               users={users}
-              seats={seats}
+              seats={seatsInOrg}
               activeRole={activeRole}
               onAddUser={handleAddUser}
               onUpdateUser={handleUpdateUser}
@@ -1921,17 +2067,18 @@ export default function App() {
               onBulkDeleteUsers={handleBulkDeleteUsers}
               onAddAuditLog={logAuditAction}
               onBulkAddEmployeesAndUsers={handleBulkAddEmployeesAndUsers}
+              onUpdateSeats={handleUpdateSeats}
             />
           )}
 
           {activeTab === "workflows" && (
             <SeatAllocation 
-              requests={requests} 
-              seats={seats} 
-              zones={zones} 
-              buildings={buildings}
-              floors={floors}
-              employees={employees}
+              requests={requestsInOrg} 
+              seats={seatsInOrg} 
+              zones={zonesInOrg} 
+              buildings={buildingsInOrg}
+              floors={floorsInOrg}
+              employees={employeesInOrg}
               currentUser={currentUser}
               onUpdateRequestStatus={handleUpdateRequestStatus} 
               onAllocateSeatDirect={handleAllocateSeatDirect}
@@ -1943,8 +2090,8 @@ export default function App() {
 
           {activeTab === "qr" && (
             <QRCodeSystem 
-              seats={seats} 
-              checkInLogs={checkInLogs} 
+              seats={seatsInOrg} 
+              checkInLogs={checkInLogsInOrg} 
               onCheckIn={handleCheckIn} 
               onCheckOut={handleCheckOut} 
             />
@@ -1952,7 +2099,7 @@ export default function App() {
 
           {activeTab === "mobile" && (
             <MobileSimulator 
-              seats={seats} 
+              seats={seatsInOrg} 
               currentUser={currentUser}
               onAddRequest={handleAddRequest} 
               onCheckIn={handleCheckIn} 
@@ -1962,21 +2109,21 @@ export default function App() {
 
           {activeTab === "audit" && (
             <AuditLogsView 
-              logs={auditLogs}
+              logs={auditLogsInOrg}
             />
           )}
 
           {activeTab === "powerbi" && (
             <PowerBIDashboard 
-              seats={seats}
-              assets={assets}
-              employees={employees}
-              buildings={buildings}
-              floors={floors}
-              zones={zones}
-              requests={requests}
-              checkInLogs={checkInLogs}
-              auditLogs={auditLogs}
+              seats={seatsInOrg}
+              assets={assetsInOrg}
+              employees={employeesInOrg}
+              buildings={buildingsInOrg}
+              floors={floorsInOrg}
+              zones={zonesInOrg}
+              requests={requestsInOrg}
+              checkInLogs={checkInLogsInOrg}
+              auditLogs={auditLogsInOrg}
             />
           )}
 
