@@ -3,6 +3,7 @@ import {
   doc, 
   setDoc, 
   deleteDoc, 
+  getDoc,
   onSnapshot, 
   writeBatch,
   query,
@@ -71,16 +72,26 @@ export function subscribeToCollection<T extends { id: string }>(
   const unsubscribe = onSnapshot(
     queryRef,
     async (snapshot) => {
-      const storageKey = `enterprizseat_has_seeded_${collectionName}`;
-      const hasSeededBefore = typeof localStorage !== "undefined" && localStorage.getItem(storageKey) === "true";
-
       if (snapshot.empty) {
+        // IMPORTANT: whether a collection has "ever been seeded" must be a durable,
+        // account-wide fact — NOT something tracked per-browser. Tracking it in
+        // localStorage meant opening the app from a new device/browser (or after
+        // clearing cache) after a collection was legitimately emptied could
+        // silently re-write old demo/seed data back into Firestore. This checks
+        // a real Firestore doc instead, so the "already seeded" fact travels with
+        // the account/project, not the browser.
+        let hasSeededBefore = false;
+        try {
+          const metaDoc = await getFirestoreDoc<{ seeded: boolean }>("_appMeta", collectionName);
+          hasSeededBefore = !!metaDoc?.seeded;
+        } catch (e) {
+          console.warn(`[Firestore Sync] Could not read seed-state meta for ${collectionName}, treating as already seeded to be safe:`, e);
+          hasSeededBefore = true; // fail safe: never re-seed if we can't confirm it's truly first-time
+        }
+
         if (!hasSeededBefore && initialFallback && initialFallback.length > 0) {
           console.log(`[Firestore Sync] First-time seeding empty collection: ${collectionName}`);
           try {
-            if (typeof localStorage !== "undefined") {
-              localStorage.setItem(storageKey, "true");
-            }
             const batch = writeBatch(db);
             initialFallback.forEach((item) => {
               const cleanItem = sanitizeData(item);
@@ -88,6 +99,7 @@ export function subscribeToCollection<T extends { id: string }>(
               batch.set(itemRef, cleanItem);
             });
             await batch.commit();
+            await saveFirestoreDoc("_appMeta", { id: collectionName, seeded: true, seededAt: new Date().toISOString() });
             onUpdate(initialFallback);
             setEncryptedStorage(collectionName, initialFallback, true);
           } catch (err) {
@@ -95,7 +107,7 @@ export function subscribeToCollection<T extends { id: string }>(
             onUpdate(initialFallback);
           }
         } else {
-          // Collection is empty (items were deleted or initialized empty)
+          // Collection is empty (items were deleted or initialized empty) — leave it empty, don't reseed.
           onUpdate([]);
           try {
             setEncryptedStorage(collectionName, [], true);
@@ -104,9 +116,16 @@ export function subscribeToCollection<T extends { id: string }>(
         return;
       }
 
-      // Snapshot has documents: mark seeded flag so future empty snapshots know it was populated
-      if (typeof localStorage !== "undefined" && !hasSeededBefore) {
-        localStorage.setItem(storageKey, "true");
+      // Snapshot has documents: mark the seeded flag (durably, in Firestore) so
+      // future empty snapshots — from any browser/device — know this collection
+      // was genuinely populated at some point and should never be auto-reseeded.
+      try {
+        const metaDoc = await getFirestoreDoc<{ seeded: boolean }>("_appMeta", collectionName);
+        if (!metaDoc?.seeded) {
+          await saveFirestoreDoc("_appMeta", { id: collectionName, seeded: true, seededAt: new Date().toISOString() });
+        }
+      } catch (e) {
+        // Non-fatal — worst case we re-check next snapshot.
       }
 
       const remoteItems: T[] = snapshot.docs.map((docSnap) => docSnap.data() as T);
@@ -149,6 +168,25 @@ export async function saveFirestoreDoc<T extends { id: string }>(
     await setDoc(docRef, cleanItem, { merge: true });
   } catch (err) {
     console.error(`[Firestore Sync] Error saving doc ${item.id} in ${collectionName}:`, err);
+  }
+}
+
+/**
+ * Fetch a single document from Firestore by id. Returns null if it doesn't exist
+ * or the read fails (e.g. offline).
+ */
+export async function getFirestoreDoc<T>(
+  collectionName: string,
+  id: string
+): Promise<T | null> {
+  try {
+    const docRef = doc(db, collectionName, id);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    return snap.data() as T;
+  } catch (err) {
+    console.error(`[Firestore Sync] Error reading doc ${id} in ${collectionName}:`, err);
+    return null;
   }
 }
 

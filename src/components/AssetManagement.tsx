@@ -168,7 +168,7 @@ export default function AssetManagement({
       status: formStatus,
       employeeId: matchedEmp?.id || formEmployeeId,
       employeeName: matchedEmp?.name || (matchedEmp ? matchedEmp.name : undefined),
-      department: matchedEmp?.department || matchedSeat?.department || "Engineering",
+      department: matchedEmp?.department || matchedSeat?.department || "Unassigned",
       company: matchedEmp?.company || "Global Cyber Systems",
       businessHead: matchedEmp?.businessHead,
       manager: matchedEmp?.manager,

@@ -62,7 +62,7 @@ export default function SeatAllocation({
   const [selectedEmpId, setSelectedEmpId] = useState<string>("");
   const [customEmpName, setCustomEmpName] = useState<string>("");
   const [customEmpEmail, setCustomEmpEmail] = useState<string>("");
-  const [customEmpDept, setCustomEmpDept] = useState<string>("Engineering");
+  const [customEmpDept, setCustomEmpDept] = useState<string>("");
   const [buildingId, setBuildingId] = useState<string>("b1");
   const [floorId, setFloorId] = useState<string>("f1");
   const [reasonText, setReasonText] = useState<string>("");
@@ -122,7 +122,7 @@ export default function SeatAllocation({
   if (isSuperUserOrAdmin) {
     roleRequests = requests;
   } else if (isMember) {
-    const memberDept = currentUser?.department || "Engineering";
+    const memberDept = currentUser?.department || "Unassigned";
     roleRequests = requests.filter(r => 
       r.department.toLowerCase() === memberDept.toLowerCase()
     );
@@ -157,7 +157,7 @@ export default function SeatAllocation({
       // Lock to current logged in user details
       setCustomEmpName(currentUser?.name || "Standard Employee");
       setCustomEmpEmail(currentUser?.email || "user@enterprise.com");
-      setCustomEmpDept(currentUser?.department || "Engineering");
+      setCustomEmpDept(currentUser?.department || "");
     } else {
       // Pre-select first employee if available
       if (employees.length > 0) {
@@ -168,7 +168,7 @@ export default function SeatAllocation({
       } else {
         setCustomEmpName(currentUser?.name || "");
         setCustomEmpEmail(currentUser?.email || "");
-        setCustomEmpDept(currentUser?.department || "Engineering");
+        setCustomEmpDept(currentUser?.department || "");
       }
     }
     setReqType("Seat Location Change");
@@ -398,7 +398,7 @@ export default function SeatAllocation({
   const canApprove = (req: SeatRequest) => {
     if (isSuperUserOrAdmin) return true;
     if (isMember) {
-      return req.status !== "Escalated" && req.department.toLowerCase() === (currentUser?.department || "Engineering").toLowerCase();
+      return req.status !== "Escalated" && req.department.toLowerCase() === (currentUser?.department || "Unassigned").toLowerCase();
     }
     return false;
   };
@@ -416,7 +416,7 @@ export default function SeatAllocation({
           </div>
           <p className="text-xs text-slate-500 font-sans mt-0.5">
             {isSuperUserOrAdmin && "Full Organization Request Queue & Automated SMTP/Microsoft Graph Dispatch."}
-            {isMember && `Departmental Request Queue & Escalation Management (${currentUser?.department || "Engineering"}).`}
+            {isMember && `Departmental Request Queue & Escalation Management (${currentUser?.department || "Unassigned"}).`}
             {isEmployee && "My Allotted Seat Information & Personal Desk Request Tracking."}
           </p>
         </div>
@@ -471,7 +471,7 @@ export default function SeatAllocation({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-400">Department:</span>
-                      <strong className="text-slate-800">{userSeat.department || currentUser?.department || "Engineering"}</strong>
+                      <strong className="text-slate-800">{userSeat.department || currentUser?.department || "Unassigned"}</strong>
                     </div>
                   </div>
                 </div>

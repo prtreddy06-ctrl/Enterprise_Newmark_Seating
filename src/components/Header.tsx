@@ -21,7 +21,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen
 } from "lucide-react";
-import AuthModal from "./AuthModal";
 import AppDownloadModal from "./AppDownloadModal";
 
 interface HeaderProps {
@@ -109,7 +108,7 @@ export default function Header({
   if (isSuperUserOrAdmin) {
     roleRequests = requests.filter(r => r.status === "Pending" || r.status === "Escalated");
   } else if (isMember) {
-    const dept = currentUser?.department || "Engineering";
+    const dept = currentUser?.department || "Unassigned";
     roleRequests = requests.filter(r => 
       (r.status === "Pending" || r.status === "Escalated") && 
       r.department.toLowerCase() === dept.toLowerCase()

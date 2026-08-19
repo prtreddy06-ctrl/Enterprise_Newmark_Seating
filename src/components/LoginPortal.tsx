@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { UserAccount, UserRole } from "../types";
 import { dispatchEmailNotification } from "../utils/emailAndDownloadService";
+import { createPasswordResetToken } from "../utils/passwordReset";
 
 interface LoginPortalProps {
   registeredUsers: UserAccount[];
@@ -148,19 +149,30 @@ export default function LoginPortal({
     onLoginSuccess(updatedUser);
   };
 
-  const handleForgotPassword = () => {
+  const handleForgotPassword = async () => {
     if (!email.trim()) {
       alert("Please enter your email address first.");
       return;
     }
-    const resetUrl = typeof window !== 'undefined' ? `${window.location.origin}/auth/reset?token=tok_${Math.random().toString(36).substring(2)}` : '#';
+
+    const targetUser = registeredUsers.find(
+      (u) => u.email.toLowerCase() === email.trim().toLowerCase()
+    );
+    if (!targetUser) {
+      setErrorMessage(`No account found registered under '${email}'. Please ask Super User or Admin to create your account.`);
+      return;
+    }
+
+    const { resetUrl } = await createPasswordResetToken(email.trim());
+
     dispatchEmailNotification({
       toEmail: email,
-      subject: "EnterprizSeat SSO Password Reset Token",
-      bodyText: `A password reset request was initiated for your corporate SSO account (${email}). Click the link below to reset your password:\n\n${resetUrl}`,
+      toName: targetUser.name,
+      subject: "EnterprizSeat Password Reset Link",
+      bodyText: `A password reset request was initiated for your corporate account (${email}). Click the link below to set a new password. This link expires in 30 minutes and can only be used once:\n\n${resetUrl}`,
       category: "Auth Gateway Security"
     });
-    alert(`Password reset link dispatched to ${email}. Check your Email Notification drawer!`);
+    alert(`Password reset link sent to ${email}. Check your inbox (and the Email Notification console for a copy).`);
     onAddAuditLog("Password Reset Initiated", "Login/Logout", `Dispatched password reset link to ${email}`);
   };
 

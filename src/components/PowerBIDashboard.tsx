@@ -27,7 +27,8 @@ import {
   RotateCcw,
   CheckCircle,
   XCircle,
-  Monitor
+  Monitor,
+  Armchair
 } from "lucide-react";
 import { Seat, ITAsset, EmployeeProfile, Building, Floor, Zone, SeatRequest, CheckInLog, AuditLog } from "../types";
 
@@ -60,7 +61,8 @@ export default function PowerBIDashboard({
   const [selectedDept, setSelectedDept] = useState<string>("All");
   const [selectedSeatType, setSelectedSeatType] = useState<string>("All");
   const [selectedTimeline, setSelectedTimeline] = useState<string>("Today");
-  const [activePage, setActivePage] = useState<"overview" | "departments" | "assets" | "matrix">("overview");
+  const [activePage, setActivePage] = useState<"overview" | "departments" | "assets" | "matrix" | "hotdesk">("overview");
+  const [hotDeskSearch, setHotDeskSearch] = useState<string>("");
 
   // Search & zero-capacity toggle for Spatial Density Matrix
   const [zoneSearchQuery, setZoneSearchQuery] = useState<string>("");
@@ -151,7 +153,7 @@ export default function PowerBIDashboard({
     list.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
 
     if (list.length === 0) {
-      return ["Engineering", "Operations", "Finance & HR", "Product Quality", "Cloud Platform"];
+      return ["Operations", "Finance & HR", "Product Quality", "Cloud Platform"];
     }
     return list;
   }, [zones, seats, employees]);
@@ -362,15 +364,46 @@ export default function PowerBIDashboard({
     });
   }, [availableDepartments, seats, zones, employees]);
 
-  // Peak Hours Distribution Simulation based on real stats
-  const hourlyPeakUtilization = [
-    { hour: "08:00 AM", rate: Math.max(15, Math.round(occupancyRate * 0.45)) },
-    { hour: "10:00 AM", rate: Math.min(98, Math.round(occupancyRate * 0.95)) },
-    { hour: "12:00 PM", rate: Math.min(99, Math.round(occupancyRate * 0.98)) },
-    { hour: "02:00 PM", rate: Math.min(100, Math.round(occupancyRate * 1.02)) },
-    { hour: "04:00 PM", rate: Math.max(30, Math.round(occupancyRate * 0.82)) },
-    { hour: "06:00 PM", rate: Math.max(10, Math.round(occupancyRate * 0.35)) }
-  ];
+  // Only show departments with real, actual seat data — strips out leftover
+  // zero-count placeholder/demo department labels that were cluttering reports.
+  const departmentAllocationDataFiltered = useMemo(() => {
+    return departmentAllocationData
+      .filter(d => d.totalSeats > 0)
+      .sort((a, b) => b.totalSeats - a.totalSeats);
+  }, [departmentAllocationData]);
+
+  const maxDeptTotalSeats = useMemo(() => {
+    return Math.max(1, ...departmentAllocationDataFiltered.map(d => d.totalSeats));
+  }, [departmentAllocationDataFiltered]);
+
+  // Hot Desk Allocation Report: Seat Number, Manager Name, Department Name,
+  // Seat Status (Vacant/Occupied), and Desk Type (Standard/Hot Desk/etc.)
+  const hotDeskAllocationData = useMemo(() => {
+    return (seats || []).map(s => {
+      const parentZone = zones.find(z => z.id === s.zoneId);
+      const managerName = s.allocatedManager || s.managerName || "Unassigned Manager";
+      const departmentName = s.department || s.allocatedDepartment || parentZone?.department || "Unassigned";
+      return {
+        seatId: s.id,
+        seatNumber: s.seatNumber,
+        managerName,
+        departmentName,
+        seatStatus: s.status, // "Vacant" | "Occupied" | "Reserved"
+        deskType: s.type // "Standard" | "Hot Desk" | "Executive" | "Collaborative"
+      };
+    });
+  }, [seats, zones]);
+
+  const filteredHotDeskAllocationData = useMemo(() => {
+    const q = hotDeskSearch.trim().toLowerCase();
+    if (!q) return hotDeskAllocationData;
+    return hotDeskAllocationData.filter(row =>
+      row.seatNumber.toLowerCase().includes(q) ||
+      row.managerName.toLowerCase().includes(q) ||
+      row.departmentName.toLowerCase().includes(q) ||
+      row.deskType.toLowerCase().includes(q)
+    );
+  }, [hotDeskAllocationData, hotDeskSearch]);
 
   // Matrix Filtered List
   const matrixSeatsList = useMemo(() => {
@@ -707,12 +740,24 @@ export default function PowerBIDashboard({
             <LayoutGrid size={14} />
             <span>Detailed Seat Matrix</span>
           </button>
+
+          <button
+            onClick={() => setActivePage("hotdesk")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activePage === "hotdesk"
+                ? "bg-slate-900 text-amber-400 shadow-sm"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <Armchair size={14} />
+            <span>Hot Desk Allocation</span>
+          </button>
         </div>
 
         {/* AI Insight Pill */}
         <div className="hidden lg:flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-900 px-3 py-1.5 rounded-xl text-xs font-medium">
           <Sparkles size={13} className="text-amber-600 shrink-0 animate-pulse" />
-          <span>AI Insight: <strong className="font-semibold">Engineering zone peak occupancy hits 92% at 2:00 PM.</strong></span>
+          <span>AI Insight: <strong className="font-semibold">{hotDeskSeatsCount} hot desks currently make up {totalSeatsCount > 0 ? Math.round((hotDeskSeatsCount / totalSeatsCount) * 100) : 0}% of total seat inventory.</strong></span>
         </div>
       </div>
 
@@ -721,44 +766,94 @@ export default function PowerBIDashboard({
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
-            {/* Visual 1: Hourly Utilization Timeline Bar Chart */}
+            {/* Visual 1: Department-Wise Seat Listing */}
             <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Peak Hours Distribution</span>
-                  <h5 className="font-bold text-slate-900 text-sm">Real-time Desk Utilization Curve</h5>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
-                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-600"></span> Normal</span>
-                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-400"></span> Heavy (&gt;75%)</span>
-                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Peak (&gt;90%)</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Department Summary</span>
+                  <h5 className="font-bold text-slate-900 text-sm">Department-Wise Seat Listing</h5>
                 </div>
               </div>
 
-              <div className="space-y-3 pt-2">
-                {hourlyPeakUtilization.map((item) => (
-                  <div key={item.hour} className="space-y-1 text-xs">
-                    <div className="flex justify-between font-medium">
-                      <span className="text-slate-600 font-mono">{item.hour}</span>
-                      <span className="text-slate-800 font-mono font-bold">{item.rate}% Utilization</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-3.5 rounded-lg overflow-hidden flex">
-                      <div 
-                        className={`h-full rounded-lg transition-all duration-500 ${
-                          item.rate > 90 
-                            ? "bg-rose-500 shadow-xs" 
-                            : item.rate > 75 
-                              ? "bg-amber-400 shadow-xs" 
-                              : "bg-blue-600 shadow-xs"
-                        }`}
-                        style={{ width: `${item.rate}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead>
+                    <tr className="bg-slate-50 border-y border-slate-200 text-slate-500 text-[11px] uppercase font-bold tracking-wider">
+                      <th className="p-2.5">Department</th>
+                      <th className="p-2.5">Total Seats</th>
+                      <th className="p-2.5">Occupied</th>
+                      <th className="p-2.5">Vacant</th>
+                      <th className="p-2.5">Occupancy Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {departmentAllocationDataFiltered.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-slate-400 italic">No department seat data available.</td>
+                      </tr>
+                    ) : (
+                      departmentAllocationDataFiltered.map(d => (
+                        <tr key={d.department} className="hover:bg-slate-50/80">
+                          <td className="p-2.5 font-bold text-slate-900">{d.department}</td>
+                          <td className="p-2.5 font-mono">{d.totalSeats}</td>
+                          <td className="p-2.5 font-mono text-blue-700">{d.occupiedSeats}</td>
+                          <td className="p-2.5 font-mono text-emerald-700">{d.vacantSeats}</td>
+                          <td className="p-2.5">
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                              d.occupancyRate >= 80 ? "bg-emerald-100 text-emerald-800" :
+                              d.occupancyRate >= 50 ? "bg-amber-100 text-amber-800" :
+                              "bg-slate-100 text-slate-600"
+                            }`}>
+                              {d.occupancyRate}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
+            {/* Visual 2: Department Seat Distribution — corporate stacked bar chart */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              <div className="border-b border-slate-100 pb-3">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Department Distribution</span>
+                <h5 className="font-bold text-slate-900 text-sm">Seat Allocation by Department</h5>
+              </div>
+
+              <div className="flex items-center gap-4 text-[10px] font-bold text-slate-500">
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-600"></span>Occupied</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-slate-200"></span>Vacant</span>
+              </div>
+
+              <div className="space-y-3.5 pt-1 max-h-[420px] overflow-y-auto pr-1">
+                {departmentAllocationDataFiltered.length === 0 ? (
+                  <div className="text-center text-slate-400 italic text-xs py-8">No department seat data available.</div>
+                ) : (
+                  departmentAllocationDataFiltered.map(d => {
+                    const occPct = (d.occupiedSeats / maxDeptTotalSeats) * 100;
+                    const vacPct = (d.vacantSeats / maxDeptTotalSeats) * 100;
+                    return (
+                      <div key={d.department} className="space-y-1">
+                        <div className="flex justify-between text-[11px] font-bold text-slate-700">
+                          <span className="truncate pr-2">{d.department}</span>
+                          <span className="font-mono text-slate-500 shrink-0">{d.totalSeats}</span>
+                        </div>
+                        <div className="w-full h-3 rounded-md bg-slate-100 overflow-hidden flex shadow-inner">
+                          <div className="h-full bg-blue-600" style={{ width: `${occPct}%` }} />
+                          <div className="h-full bg-slate-300" style={{ width: `${vacPct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Visual 2: Seat Type Share & Hot Desk Index */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-5">
               <div>
@@ -1291,6 +1386,79 @@ export default function PowerBIDashboard({
                       </tr>
                     );
                   })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* PAGE 5: HOT DESK ALLOCATION REPORT */}
+      {activePage === "hotdesk" && (
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Seating Upload Report</span>
+              <h5 className="font-bold text-slate-900 text-sm">Hot Desk Allocation</h5>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search seat, manager, department, desk type..."
+                  value={hotDeskSearch}
+                  onChange={(e) => setHotDeskSearch(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-amber-500 w-72"
+                />
+              </div>
+              <span className="text-xs font-mono font-bold text-slate-500">{filteredHotDeskAllocationData.length} rows</span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-700">
+              <thead>
+                <tr className="bg-slate-50 border-y border-slate-200 text-slate-500 text-[11px] uppercase font-bold tracking-wider">
+                  <th className="p-3">Seat Number</th>
+                  <th className="p-3">Manager Name</th>
+                  <th className="p-3">Department Name</th>
+                  <th className="p-3">Seat Type</th>
+                  <th className="p-3">Desk Type</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredHotDeskAllocationData.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="p-6 text-center text-slate-400 italic">
+                      No matching seats found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredHotDeskAllocationData.map(row => (
+                    <tr key={row.seatId} className="hover:bg-slate-50/80">
+                      <td className="p-3 font-bold font-mono text-slate-900">{row.seatNumber}</td>
+                      <td className="p-3 font-medium text-slate-800">{row.managerName}</td>
+                      <td className="p-3 font-medium text-slate-700">{row.departmentName}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                          row.seatStatus === "Occupied" ? "bg-emerald-100 text-emerald-800" :
+                          row.seatStatus === "Reserved" ? "bg-amber-100 text-amber-800" :
+                          "bg-slate-100 text-slate-600"
+                        }`}>
+                          {row.seatStatus}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                          row.deskType === "Hot Desk" ? "bg-blue-100 text-blue-800" : "bg-slate-100 text-slate-700"
+                        }`}>
+                          {row.deskType}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>

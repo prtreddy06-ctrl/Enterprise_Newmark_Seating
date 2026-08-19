@@ -64,7 +64,7 @@ export default function UserManagement({
   const [formName, setFormName] = useState("");
   const [formEmail, setFormEmail] = useState("");
   const [formRole, setFormRole] = useState<UserRole>(UserRole.USER);
-  const [formDepartment, setFormDepartment] = useState("Engineering");
+  const [formDepartment, setFormDepartment] = useState("");
   const [formSeatNumber, setFormSeatNumber] = useState("");
   const [formStatus, setFormStatus] = useState<"Active" | "Inactive" | "Locked">("Active");
 
@@ -83,7 +83,7 @@ export default function UserManagement({
       d.toLowerCase() !== "vacant" && d.toLowerCase() !== "n/a" && d.toLowerCase() !== "unallocated"
     );
     list.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
-    return list.length > 0 ? list : ["Corporate Infrastructure", "Operations", "Engineering"];
+    return list.length > 0 ? list : ["Corporate Infrastructure", "Operations"];
   }, [users, seats]);
 
   const filteredUsers = users.filter(u => {
@@ -107,7 +107,7 @@ export default function UserManagement({
     setFormName("");
     setFormEmail("");
     setFormRole(UserRole.USER);
-    setFormDepartment("Engineering");
+    setFormDepartment("");
     setFormSeatNumber("");
     setFormStatus("Active");
     setIsModalOpen(true);
@@ -122,7 +122,7 @@ export default function UserManagement({
     setFormName(user.name);
     setFormEmail(user.email);
     setFormRole(user.role);
-    setFormDepartment(user.department || "Engineering");
+    setFormDepartment(user.department || "");
     setFormSeatNumber(user.allocatedSeatNumber || "");
     setFormStatus(user.status);
     setIsModalOpen(true);

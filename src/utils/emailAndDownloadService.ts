@@ -183,7 +183,7 @@ endobj
 << /Type /Pages /Kids [4 0 R] /Count 1 >>
 endobj
 4 0 obj
-<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 5 0 R >>
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 6 0 R >> >> >>
 endobj
 5 0 obj
 << /Length 250 >>
@@ -204,16 +204,14 @@ BT
 ET
 endstream
 endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
 xref
-0 6
+0 7
 0000000000 65535 f 
-0000000018 00000 n 
-0000000180 00000 n 
-0000000227 00000 n 
-0000000284 00000 n 
-0000000371 00000 n 
 trailer
-<< /Size 6 /Root 2 0 R >>
+<< /Size 7 /Root 2 0 R >>
 startxref
 675
 %%EOF`;
@@ -221,18 +219,11 @@ startxref
 }
 
 /**
- * Generates and downloads a formatted .eml file for local email client / outlook import
+ * Builds the shared HTML email body used both for the downloadable .eml file
+ * and for the real outbound send via /api/send-email.
  */
-export function downloadEMLEmail(payload: EmailPayload) {
-  const emlContent = `From: ${payload.sender || "EnterprizSeat Automated Mailer <no-reply@enterprizseat.corp>"}
-To: ${payload.toName ? `${payload.toName} <${payload.toEmail}>` : payload.toEmail}
-Subject: ${payload.subject}
-Date: ${new Date(payload.timestamp).toUTCString()}
-MIME-Version: 1.0
-Content-Type: text/html; charset=UTF-8
-X-Mailer: EnterprizSeat Enterprise SMTP Relay v4.2
-
-<!DOCTYPE html>
+export function buildEmailHtml(payload: EmailPayload): string {
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -275,6 +266,21 @@ X-Mailer: EnterprizSeat Enterprise SMTP Relay v4.2
 </body>
 </html>
 `;
+}
+
+/**
+ * Generates and downloads a formatted .eml file for local email client / outlook import
+ */
+export function downloadEMLEmail(payload: EmailPayload) {
+  const emlContent = `From: ${payload.sender || "EnterprizSeat Automated Mailer <no-reply@enterprizseat.corp>"}
+To: ${payload.toName ? `${payload.toName} <${payload.toEmail}>` : payload.toEmail}
+Subject: ${payload.subject}
+Date: ${new Date(payload.timestamp).toUTCString()}
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+X-Mailer: EnterprizSeat Enterprise SMTP Relay v4.2
+
+${buildEmailHtml(payload)}`;
 
   const filename = `Email_${payload.subject.replace(/[^a-zA-Z0-9]/g, "_")}.eml`;
   downloadFile(filename, emlContent, "message/rfc822");
@@ -289,7 +295,39 @@ export function openMailClient(to: string, subject: string, bodyText: string) {
 }
 
 /**
- * Dispatches a global event that triggers top toast & SMTP Relay console
+ * Actually delivers an email over the network via the /api/send-email
+ * serverless function (see api/send-email.ts). Fails silently (console
+ * warning only) if the backend isn't configured yet, so the in-app console
+ * experience keeps working either way — but once RESEND_API_KEY is set in
+ * Vercel, this is what makes the message land in the recipient's real inbox.
+ */
+async function sendRealEmail(payload: EmailPayload): Promise<void> {
+  try {
+    const res = await fetch("/api/send-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: payload.toEmail,
+        cc: payload.groupEmailSender,
+        subject: payload.subject,
+        html: buildEmailHtml(payload),
+        text: payload.bodyText
+      })
+    });
+    const data = await res.json().catch(() => null);
+    if (!data?.sent) {
+      console.warn(
+        `[Email Delivery] "${payload.subject}" to ${payload.toEmail} was NOT actually delivered. Reason: ${data?.reason || "Unknown — check /api/send-email deployment."}`
+      );
+    }
+  } catch (err) {
+    console.warn(`[Email Delivery] Could not reach /api/send-email for "${payload.subject}":`, err);
+  }
+}
+
+/**
+ * Dispatches a global event that triggers top toast & SMTP Relay console,
+ * AND actually sends the email over the network (see sendRealEmail above).
  */
 export function dispatchEmailNotification(payload: Omit<EmailPayload, "id" | "timestamp">) {
   const groupEmail = getOutlookGroupEmail();
@@ -301,9 +339,12 @@ export function dispatchEmailNotification(payload: Omit<EmailPayload, "id" | "ti
     sender: payload.sender || `EnterprizSeat Workspace <${groupEmail}>`
   };
 
-  // Dispatch custom browser window event
+  // Dispatch custom browser window event (drives the in-app toast/console)
   const event = new CustomEvent("enterprizseat:email_dispatched", { detail: fullPayload });
   window.dispatchEvent(event);
+
+  // Fire the real delivery in the background — never blocks the caller.
+  void sendRealEmail(fullPayload);
 
   return fullPayload;
 }

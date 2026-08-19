@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Smartphone, 
   QrCode, 
@@ -41,6 +41,16 @@ export default function AppDownloadModal({
   const [dispatchEmail, setDispatchEmail] = useState(userEmail);
   const [emailSentSuccess, setEmailSentSuccess] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -60,19 +70,27 @@ export default function AppDownloadModal({
   };
 
   const handleTriggerApk = () => {
-    setDownloadProgress("Downloading EnterprizSeat_Companion_v2.4_release.apk (32.4 MB)...");
+    if (deferredInstallPrompt) {
+      // Real browser-native install prompt is available — use it instead of the HTML fallback.
+      deferredInstallPrompt.prompt();
+      if (onAddAuditLog) {
+        onAddAuditLog("PWA Install Prompted", "Mobile App", "Triggered native browser install prompt for Android.");
+      }
+      return;
+    }
+    setDownloadProgress("Opening Android install package (web app installer)...");
     downloadMobileAPK();
     if (onAddAuditLog) {
-      onAddAuditLog("APK Download", "Mobile App", "Downloaded native Android companion APK v2.4.");
+      onAddAuditLog("Android Package Download", "Mobile App", "Downloaded Android web app installer helper.");
     }
     setTimeout(() => setDownloadProgress(null), 3000);
   };
 
   const handleTriggerIpa = () => {
-    setDownloadProgress("Downloading EnterprizSeat_Companion_v2.4.ipa (iOS TestFlight)...");
+    setDownloadProgress("Opening iOS install package (Add to Home Screen helper)...");
     downloadMobileIPA();
     if (onAddAuditLog) {
-      onAddAuditLog("IPA Download", "Mobile App", "Downloaded native iOS companion IPA v2.4.");
+      onAddAuditLog("iOS Package Download", "Mobile App", "Downloaded iOS web app installer helper.");
     }
     setTimeout(() => setDownloadProgress(null), 3000);
   };
@@ -138,7 +156,7 @@ Scan desk QR labels directly using the mobile camera scanner once installed.`,
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Native Android APK, iOS TestFlight, and Optical Camera QR Scanner
+                Android & iOS Progressive Web App Installer, plus Optical Camera QR Scanner
               </p>
             </div>
           </div>
@@ -225,13 +243,15 @@ Scan desk QR labels directly using the mobile camera scanner once installed.`,
                 <div>
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded font-mono">
-                      Android Package (.HTML / .APK)
+                      Android Web App Installer
                     </span>
-                    <span className="text-xs font-mono text-slate-400">32.4 MB</span>
+                    {deferredInstallPrompt && (
+                      <span className="text-[10px] font-mono text-emerald-600 font-bold">Native install ready</span>
+                    )}
                   </div>
                   <h4 className="font-bold text-slate-800 text-sm mt-2">EnterprizSeat Mobile Package</h4>
                   <p className="text-xs text-slate-500 mt-1">
-                    Direct Mobile Web App Installer package for Android 10+. Features camera QR desk check-in, BLE proximity, and IT asset scanning.
+                    Installs as a real Progressive Web App on Android 10+ — camera QR desk check-in and IT asset scanning included. There is no separate .apk to side-load; this is not a native binary.
                   </p>
                 </div>
                 <button
@@ -239,7 +259,7 @@ Scan desk QR labels directly using the mobile camera scanner once installed.`,
                   className="w-full mt-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
                 >
                   <Download size={15} />
-                  <span>Download Android Mobile Package</span>
+                  <span>{deferredInstallPrompt ? "Install Android App" : "Download Android Install Package"}</span>
                 </button>
               </div>
 
@@ -248,13 +268,12 @@ Scan desk QR labels directly using the mobile camera scanner once installed.`,
                 <div>
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-100 px-2 py-0.5 rounded font-mono">
-                      iOS TestFlight (.IPA)
+                      iOS Web App Installer
                     </span>
-                    <span className="text-xs font-mono text-slate-400">28.1 MB</span>
                   </div>
                   <h4 className="font-bold text-slate-800 text-sm mt-2">EnterprizSeat iOS</h4>
                   <p className="text-xs text-slate-500 mt-1">
-                    iOS Enterprise distribution build. Includes Apple Wallet desk pass integration & FaceID biometric auth.
+                    Installs via Safari's "Add to Home Screen" as a full-screen standalone app. Apple does not permit installing .ipa files outside the App Store/TestFlight, so this is the correct install method for a web-based companion.
                   </p>
                 </div>
                 <button

@@ -69,6 +69,11 @@ export interface Zone {
   height: number;
   capacity: number;
   isConfirmed?: boolean;
+  // Optional freeform outline: when set, the zone renders as a smooth custom
+  // shape through these points (in zone-local coordinates, i.e. relative to
+  // x/y) instead of a plain rectangle. Each point can be dragged independently
+  // so a single side can be pushed in/out without moving the whole edge.
+  points?: { x: number; y: number }[];
 }
 
 export interface ITAsset {

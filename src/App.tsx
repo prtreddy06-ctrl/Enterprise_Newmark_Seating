@@ -21,6 +21,7 @@ import {
 
 import Header from "./components/Header";
 import LoginPortal from "./components/LoginPortal";
+import ResetPasswordScreen from "./components/ResetPasswordScreen";
 import EmailToastAndModal from "./components/EmailToastAndModal";
 import UserProfileModal from "./components/UserProfileModal";
 import CreateSiteModal from "./components/CreateSiteModal";
@@ -260,6 +261,12 @@ export default function App() {
 
   // Current Logged-In User State (restores session on page refresh)
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => loadInitialSessionUser(loadCleanUsers()));
+
+  // Password reset deep-link: captured once on initial load from ?resetToken=...
+  const [resetTokenFromUrl, setResetTokenFromUrl] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("resetToken");
+  });
   const [sessionExpiredNotice, setSessionExpiredNotice] = useState<boolean>(false);
   const lastActivityRef = useRef<number>(Date.now());
 
@@ -1085,7 +1092,7 @@ export default function App() {
           employeeId: `emp-scan-${Date.now()}`,
           employeeName,
           employeeEmail: `${employeeName.toLowerCase().replace(/\s/g, ".")}@enterprise.com`,
-          department: "Engineering"
+          department: "Unassigned"
         };
         saveFirestoreDoc("seats", updatedS);
         return updatedS;
@@ -1166,7 +1173,7 @@ export default function App() {
       id: `emp-${user.id}`,
       name: user.name,
       email: user.email,
-      department: user.department || "Engineering",
+      department: user.department || "Unassigned",
       company: "Global Cyber Systems",
       manager: "Raviteja Reddy palagiri",
       floor: "11 th Floor CRE",
@@ -1460,6 +1467,35 @@ export default function App() {
     }
     return base + "hover:bg-slate-50 text-slate-600";
   };
+
+  // Password reset link routing: if the URL carries a ?resetToken=..., always
+  // show the Reset Password screen (even if the browser still has an active
+  // session cached) instead of silently falling through to the normal
+  // login/app screens, which is the bug that made reset links "do nothing."
+  if (resetTokenFromUrl) {
+    return (
+      <>
+        <ResetPasswordScreen
+          token={resetTokenFromUrl}
+          registeredUsers={users}
+          onAddAuditLog={logAuditAction}
+          onBackToLogin={() => {
+            setResetTokenFromUrl(null);
+            window.history.replaceState({}, "", window.location.pathname);
+          }}
+          onPasswordReset={(updatedUser) => {
+            saveFirestoreDoc("users", updatedUser);
+            setUsers(prev => {
+              const updated = prev.map(u => u.id === updatedUser.id ? updatedUser : u);
+              setEncryptedStorage("users", updated);
+              return updated;
+            });
+          }}
+        />
+        <EmailToastAndModal />
+      </>
+    );
+  }
 
   // Render Login Portal if not logged in
   if (!currentUser) {

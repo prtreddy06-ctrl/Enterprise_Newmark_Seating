@@ -246,7 +246,7 @@ export default function EmployeeDirectory({
           const rowNum = index + 2;
           const fullName = (row["Full Name"] || row["Name"] || row["name"] || "").toString().trim();
           const email = (row["Corporate Email"] || row["Email"] || row["email"] || "").toString().trim();
-          const dept = (row["Department"] || row["department"] || "Engineering").toString().trim();
+          const dept = (row["Department"] || row["department"] || "Unassigned").toString().trim();
           const roleStr = (row["Role Designation"] || row["Role"] || row["role"] || "Standard User").toString().trim();
           const company = (row["Company"] || "Global Cyber Systems").toString().trim();
           const businessHead = (row["Business Head"] || "").toString().trim();

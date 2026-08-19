@@ -47,7 +47,10 @@ import {
   Edit3,
   Maximize,
   Palette,
-  Users
+  Users,
+  ChevronDown,
+  PanelLeftOpen,
+  PanelLeftClose
 } from "lucide-react";
 
 interface LayoutVersion {
@@ -112,6 +115,8 @@ export default function FloorMapDesigner({
 
   // Map Edit Protection Mode: defaults to false (Protected View Map mode) to prevent accidental layout modifications
   const [isMapEditMode, setIsMapEditMode] = useState<boolean>(false);
+  const [showMoreToolsMenu, setShowMoreToolsMenu] = useState<boolean>(false);
+  const [showSidebarPalette, setShowSidebarPalette] = useState<boolean>(false);
   const canModifyCanvas = canEditLayout && isMapEditMode;
 
   const [selectedBuildingId, setSelectedBuildingId] = useState<string>("b1");
@@ -121,6 +126,44 @@ export default function FloorMapDesigner({
   const [selectedManagerFilter, setSelectedManagerFilter] = useState<string>("All");
   const [showManagerListModal, setShowManagerListModal] = useState<boolean>(false);
   const [managerSearchQuery, setManagerSearchQuery] = useState<string>("");
+
+  // Department Name Search/Filter for Zone Highlighting
+  const [departmentSearchQuery, setDepartmentSearchQuery] = useState<string>("");
+
+  // Only suggest departments that actually have at least one real seat —
+  // this stops empty/leftover demo zones (e.g. old seed data with 0 seats)
+  // from cluttering the department search autocomplete.
+  const departmentList = useMemo(() => {
+    const set = new Set<string>();
+    (zones || []).forEach(z => {
+      if (!z.department || !z.department.trim() || z.department.toLowerCase().includes("unassigned")) return;
+      const hasRealSeats = (seats || []).some(s => s.zoneId === z.id);
+      if (hasRealSeats) set.add(z.department.trim());
+    });
+    const list = Array.from(set);
+    list.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return list;
+  }, [zones, seats]);
+
+  const matchingDepartmentZoneIds = useMemo(() => {
+    const q = departmentSearchQuery.trim().toLowerCase();
+    if (!q) return new Set<string>();
+    return new Set(
+      (zones || [])
+        .filter(z => (z.department || "").toLowerCase().includes(q))
+        .map(z => z.id)
+    );
+  }, [zones, departmentSearchQuery]);
+
+  const matchingDepartmentSeatsCount = useMemo(() => {
+    const q = departmentSearchQuery.trim().toLowerCase();
+    if (!q) return 0;
+    return (seats || []).filter(s =>
+      matchingDepartmentZoneIds.has(s.zoneId) ||
+      (s.department || "").toLowerCase().includes(q) ||
+      (s.allocatedDepartment || "").toLowerCase().includes(q)
+    ).length;
+  }, [seats, matchingDepartmentZoneIds, departmentSearchQuery]);
 
   const managerList = useMemo(() => {
     const set = new Set<string>();
@@ -356,7 +399,7 @@ export default function FloorMapDesigner({
   const [showRenameFloorModal, setShowRenameFloorModal] = useState<boolean>(false);
   const [renameFloorNameInput, setRenameFloorNameInput] = useState<string>("");
   const [showBulkDeptModal, setShowBulkDeptModal] = useState<boolean>(false);
-  const [bulkDeptInput, setBulkDeptInput] = useState<string>("Engineering");
+  const [bulkDeptInput, setBulkDeptInput] = useState<string>("");
   const [bulkManagerInput, setBulkManagerInput] = useState<string>("");
   const [bulkIsFixedSlot, setBulkIsFixedSlot] = useState<boolean>(true);
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
@@ -399,6 +442,120 @@ export default function FloorMapDesigner({
 
   // Edit & Enlarge Facility Modal State
   const [editingObjectModal, setEditingObjectModal] = useState<LayoutObject | null>(null);
+
+  // Freeform Zone Corner/Curve Editing: lets a single point on the outline be
+  // dragged independently (pushed in or out) instead of the whole side moving
+  // together, and renders the outline as a smooth curve through the points.
+  const [activeDragVertex, setActiveDragVertex] = useState<{
+    zoneId: string;
+    vertexIndex: number;
+    startX: number;
+    startY: number;
+    initialVX: number;
+    initialVY: number;
+  } | null>(null);
+
+  /** Default 8-point outline (4 corners + 4 edge midpoints) for a zone's current box, in zone-local coordinates. */
+  const getDefaultZonePoints = (zone: Zone): { x: number; y: number }[] => [
+    { x: 0, y: 0 },
+    { x: zone.width / 2, y: 0 },
+    { x: zone.width, y: 0 },
+    { x: zone.width, y: zone.height / 2 },
+    { x: zone.width, y: zone.height },
+    { x: zone.width / 2, y: zone.height },
+    { x: 0, y: zone.height },
+    { x: 0, y: zone.height / 2 }
+  ];
+
+  /** Turns a zone into an editable freeform outline (no-op if already freeform). */
+  const enableFreeformZone = (zone: Zone) => {
+    if (zone.points && zone.points.length > 0) return;
+    saveSnapshot();
+    const updated = zones.map(z => z.id === zone.id ? { ...z, points: getDefaultZonePoints(zone) } : z);
+    onUpdateZones(updated);
+    if (onAddAuditLog) onAddAuditLog("Enable Freeform Corners", "Floor Map", `Enabled per-corner freeform/curve editing on zone "${zone.name}"`);
+  };
+
+  /** Reverts a freeform zone back to a plain rectangle. */
+  const resetZoneToRectangle = (zone: Zone) => {
+    saveSnapshot();
+    const updated = zones.map(z => {
+      if (z.id !== zone.id) return z;
+      const { points, ...rest } = z;
+      return rest as Zone;
+    });
+    onUpdateZones(updated);
+    if (onAddAuditLog) onAddAuditLog("Reset Zone Shape", "Floor Map", `Reset zone "${zone.name}" back to a plain rectangle`);
+  };
+
+  /** Builds a smooth closed SVG path (via Catmull-Rom -> cubic Bezier) through a set of points. */
+  const buildSmoothClosedPath = (points: { x: number; y: number }[]): string => {
+    const n = points.length;
+    if (n < 3) return "";
+    const p = (i: number) => points[((i % n) + n) % n];
+    let d = `M ${p(0).x} ${p(0).y} `;
+    for (let i = 0; i < n; i++) {
+      const p0 = p(i - 1), p1 = p(i), p2 = p(i + 1), p3 = p(i + 2);
+      const c1x = p1.x + (p2.x - p0.x) / 6;
+      const c1y = p1.y + (p2.y - p0.y) / 6;
+      const c2x = p2.x - (p3.x - p1.x) / 6;
+      const c2y = p2.y - (p3.y - p1.y) / 6;
+      d += `C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y} `;
+    }
+    return d + "Z";
+  };
+
+  const startDragZoneVertex = (e: React.MouseEvent, zone: Zone, vertexIndex: number) => {
+    e.stopPropagation();
+    if (!canModifyCanvas || !zone.points) return;
+    saveSnapshot();
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const cursorInCanvasX = (e.clientX - rect.left - pan.x) / zoom;
+    const cursorInCanvasY = (e.clientY - rect.top - pan.y) / zoom;
+    const vertex = zone.points[vertexIndex];
+
+    setActiveDragVertex({
+      zoneId: zone.id,
+      vertexIndex,
+      startX: cursorInCanvasX,
+      startY: cursorInCanvasY,
+      initialVX: vertex.x,
+      initialVY: vertex.y
+    });
+  };
+
+  /** Double-click on the freeform outline inserts a new draggable point at the nearest edge midpoint, giving finer control for irregular real-map shapes. */
+  const insertZoneVertexAtClick = (e: React.MouseEvent, zone: Zone) => {
+    e.stopPropagation();
+    if (!canModifyCanvas || !zone.points || zone.points.length === 0) return;
+    const svgEl = (e.currentTarget as SVGPathElement).ownerSVGElement;
+    if (!svgEl) return;
+    const rect = svgEl.getBoundingClientRect();
+    const clickX = (e.clientX - rect.left) / zoom;
+    const clickY = (e.clientY - rect.top) / zoom;
+
+    const pts = zone.points;
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+      const d = Math.hypot(clickX - midX, clickY - midY);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    const a = pts[bestIdx], b = pts[(bestIdx + 1) % pts.length];
+    const newPoint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+
+    saveSnapshot();
+    const updated = zones.map(z =>
+      z.id === zone.id
+        ? { ...z, points: [...pts.slice(0, bestIdx + 1), newPoint, ...pts.slice(bestIdx + 1)] }
+        : z
+    );
+    onUpdateZones(updated);
+    if (onAddAuditLog) onAddAuditLog("Add Curve Point", "Floor Map", `Added an extra outline point to zone "${zone.name}" for finer freeform shaping.`);
+  };
 
   const filterCleanSeats = (seatList: Seat[]): Seat[] => {
     return (seatList || []).filter(s => {
@@ -1037,7 +1194,7 @@ export default function FloorMapDesigner({
 
   // Zoom limits
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.1, 2.5));
-  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.1, 0.4));
+  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.1, 0.2));
   const handleZoomReset = () => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
@@ -1209,6 +1366,30 @@ export default function FloorMapDesigner({
         x: e.clientX - panStart.x,
         y: e.clientY - panStart.y
       });
+      return;
+    }
+
+    if (activeDragVertex && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const cursorInCanvasX = (e.clientX - rect.left - pan.x) / zoom;
+      const cursorInCanvasY = (e.clientY - rect.top - pan.y) / zoom;
+
+      let newVX = activeDragVertex.initialVX + (cursorInCanvasX - activeDragVertex.startX);
+      let newVY = activeDragVertex.initialVY + (cursorInCanvasY - activeDragVertex.startY);
+
+      if (snapToGrid) {
+        newVX = Math.round(newVX / gridSize) * gridSize;
+        newVY = Math.round(newVY / gridSize) * gridSize;
+      }
+
+      const updatedZones = zones.map(z => {
+        if (z.id !== activeDragVertex.zoneId || !z.points) return z;
+        const newPoints = z.points.map((pt, idx) =>
+          idx === activeDragVertex.vertexIndex ? { x: newVX, y: newVY } : pt
+        );
+        return { ...z, points: newPoints };
+      });
+      onUpdateZones(updatedZones);
       return;
     }
 
@@ -1395,6 +1576,7 @@ export default function FloorMapDesigner({
             let targetY = finalY;
 
             let newZoneId = activeSeat.zoneId;
+            let didCrossIntoNewZone = false;
 
             if (lockSeatsInZone && activeSeat.zoneId) {
               const parentZone = localZonesRef.current.find(z => z.id === activeSeat.zoneId);
@@ -1413,15 +1595,22 @@ export default function FloorMapDesigner({
                 targetX >= z.x - 10 && targetX <= z.x + z.width - 15 &&
                 targetY >= z.y - 10 && targetY <= z.y + z.height - 15
               );
-              if (landedZone) {
+              if (landedZone && landedZone.id !== activeSeat.zoneId) {
                 newZoneId = landedZone.id;
+                didCrossIntoNewZone = true;
               }
             }
 
             const updatedSeats = localSeatsRef.current.map(s => 
-              s.id === activeDragElement.id ? { ...s, x: targetX, y: targetY, zoneId: newZoneId } : s
+              s.id === activeDragElement.id
+                ? { ...s, x: targetX, y: targetY, zoneId: newZoneId, isFixedSlot: didCrossIntoNewZone ? true : s.isFixedSlot }
+                : s
             );
             updateLocalSeats(updatedSeats);
+            if (didCrossIntoNewZone && onAddAuditLog) {
+              const newZoneName = localZonesRef.current.find(z => z.id === newZoneId)?.name || newZoneId;
+              onAddAuditLog("Seat Moved & Locked to Zone", "Floor Map", `Seat ${activeSeat.seatNumber} moved into zone "${newZoneName}" and locked there.`);
+            }
           }
         }
       } else if (activeDragElement.type === "object") {
@@ -1477,6 +1666,7 @@ export default function FloorMapDesigner({
     setActiveDragElement(null);
     setActiveResizeZone(null);
     setActiveResizeObject(null);
+    setActiveDragVertex(null);
   };
 
   const startDragElement = (e: React.MouseEvent, type: "zone" | "seat" | "object", id: string, initialX: number, initialY: number) => {
@@ -1809,7 +1999,7 @@ export default function FloorMapDesigner({
         const cols = Math.min(8, Math.max(3, Math.floor((z.width - 20) / 48)));
         const startX = z.x + 20;
         const startY = z.y + 40;
-        const dept = z.department || "Engineering";
+        const dept = z.department || "Unassigned";
 
         for (let i = 0; i < capacity; i++) {
           const col = i % cols;
@@ -2209,8 +2399,8 @@ export default function FloorMapDesigner({
           </div>
         </div>
 
-        {/* Action Button Group */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Action Button Group — compact single line, secondary actions tucked into "More Tools" */}
+        <div className="flex flex-wrap items-center gap-2 relative">
           {canEditLayout ? (
             <>
               {/* MAP PROTECTION TOGGLE BUTTON */}
@@ -2218,6 +2408,7 @@ export default function FloorMapDesigner({
                 <button 
                   onClick={() => {
                     setIsMapEditMode(true);
+                    setShowSidebarPalette(true);
                     if (onAddAuditLog) onAddAuditLog("Enable Map Edit Mode", "Floor Designer", "Unlocked floor map for layout modifications");
                   }}
                   className="bg-amber-500 hover:bg-amber-600 text-white text-xs px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-md shadow-amber-200 transition-all cursor-pointer ring-2 ring-amber-300 ring-offset-1 animate-pulse"
@@ -2240,8 +2431,8 @@ export default function FloorMapDesigner({
                 </button>
               )}
 
-              {/* MODE STATUS PILL */}
-              <div className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+              {/* MODE STATUS PILL — compact, icon-only label on small screens */}
+              <div className={`hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all shrink-0 ${
                 isMapEditMode 
                   ? "bg-amber-50 text-amber-900 border-amber-300" 
                   : "bg-blue-50 text-blue-900 border-blue-200"
@@ -2249,100 +2440,117 @@ export default function FloorMapDesigner({
                 {isMapEditMode ? (
                   <>
                     <Edit3 size={13} className="text-amber-600 animate-pulse" />
-                    <span>Edit Mode (Unlocked)</span>
+                    <span>Edit Mode</span>
                   </>
                 ) : (
                   <>
                     <Lock size={13} className="text-blue-600" />
-                    <span>View Map Mode (Protected)</span>
+                    <span>Protected View</span>
                   </>
                 )}
               </div>
 
-              {/* Building & Floor creation buttons */}
-              <button 
-                onClick={() => {
-                  if (!isMapEditMode) setIsMapEditMode(true);
-                  setShowCreateBuildingModal(true);
-                }}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              {/* Show/Hide Sidebar Toggle */}
+              <button
+                onClick={() => setShowSidebarPalette(prev => !prev)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                title={showSidebarPalette ? "Hide the tools sidebar to free up canvas space" : "Show the tools sidebar (drag-and-drop palette, building/floor scope)"}
               >
-                <Building2 size={14} />
-                <span>+ Building</span>
-              </button>
-
-              <button 
-                onClick={() => {
-                  if (!isMapEditMode) setIsMapEditMode(true);
-                  setShowCreateFloorModal(true);
-                }}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <PlusCircle size={14} />
-                <span>+ Floor</span>
-              </button>
-
-              <button 
-                onClick={() => {
-                  if (!isMapEditMode) setIsMapEditMode(true);
-                  setShowBulkGeneratorModal(true);
-                }}
-                className="bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <LayoutGrid size={14} />
-                <span>Bulk Seat Generator</span>
-              </button>
-
-              <button 
-                onClick={() => {
-                  if (!isMapEditMode) setIsMapEditMode(true);
-                  setShowExcelLayoutUploadModal(true);
-                }}
-                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <FileSpreadsheet size={14} />
-                <span>Import Excel Layout</span>
-              </button>
-
-              <button 
-                onClick={() => downloadDepartmentSeatTemplate(onAddAuditLog)}
-                className="bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs px-3 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                title="Download Bulk Department Seat Allocation Excel Template (.xlsx)"
-              >
-                <Download size={14} className="text-teal-600" />
-                <span>Download Excel Template</span>
-              </button>
-
-              <button 
-                onClick={() => {
-                  if (!isMapEditMode) setIsMapEditMode(true);
-                  handleDuplicateFloor();
-                }}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Copy size={14} />
-                <span>Duplicate Floor</span>
+                {showSidebarPalette ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+                <span className="hidden md:inline">{showSidebarPalette ? "Hide Sidebar" : "Show Sidebar"}</span>
               </button>
 
               <button 
                 onClick={() => setShowSaveVersionModal(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-xl font-bold shadow-md shadow-blue-200 flex items-center gap-1.5 transition-all cursor-pointer"
+                className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-xl font-bold shadow-md shadow-blue-200 flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
               >
                 <Save size={14} />
                 <span>Save & Version</span>
               </button>
 
-              <button 
-                onClick={() => {
-                  if (!isMapEditMode) setIsMapEditMode(true);
-                  setShowManageInfrastructureModal(true);
-                }}
-                className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                title="Delete multiple buildings or floors in bulk"
-              >
-                <Trash2 size={14} />
-                <span>Delete Buildings / Floors</span>
-              </button>
+              {/* MORE TOOLS DROPDOWN — everything less-frequently-used lives here */}
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setShowMoreToolsMenu(prev => !prev)}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Settings size={14} />
+                  <span>More Tools</span>
+                  <ChevronDown size={13} className={`transition-transform ${showMoreToolsMenu ? "rotate-180" : ""}`} />
+                </button>
+
+                {showMoreToolsMenu && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowMoreToolsMenu(false)} />
+                    <div className="absolute top-full left-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5 max-h-[70vh] overflow-y-auto">
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); if (!isMapEditMode) setIsMapEditMode(true); setShowCreateBuildingModal(true); }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <Building2 size={14} className="text-slate-500" /><span>+ Building</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); if (!isMapEditMode) setIsMapEditMode(true); setShowCreateFloorModal(true); }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <PlusCircle size={14} className="text-slate-500" /><span>+ Floor</span>
+                      </button>
+                      <div className="my-1 border-t border-slate-100" />
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); if (!isMapEditMode) setIsMapEditMode(true); setShowBulkGeneratorModal(true); }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <LayoutGrid size={14} className="text-purple-500" /><span>Bulk Seat Generator</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); if (!isMapEditMode) setIsMapEditMode(true); setShowExcelLayoutUploadModal(true); }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <FileSpreadsheet size={14} className="text-emerald-500" /><span>Import Excel Layout</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); downloadDepartmentSeatTemplate(onAddAuditLog); }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <Download size={14} className="text-teal-500" /><span>Download Excel Template</span>
+                      </button>
+                      <div className="my-1 border-t border-slate-100" />
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); if (!isMapEditMode) setIsMapEditMode(true); handleDuplicateFloor(); }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <Copy size={14} className="text-slate-500" /><span>Duplicate Floor</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); setShowPreviewModal(true); }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <Eye size={14} className="text-blue-500" /><span>Preview Layout</span>
+                      </button>
+                      <div className="my-1 border-t border-slate-100" />
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); fileInputRef.current?.click(); }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <Upload size={14} className="text-purple-500" /><span>Restore JSON</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); handleExportFloorJSON(); }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <Download size={14} className="text-slate-500" /><span>Backup JSON</span>
+                      </button>
+                      <div className="my-1 border-t border-slate-100" />
+                      <button
+                        onClick={() => { setShowMoreToolsMenu(false); if (!isMapEditMode) setIsMapEditMode(true); setShowManageInfrastructureModal(true); }}
+                        className="w-full px-3.5 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <Trash2 size={14} className="text-rose-500" /><span>Delete Buildings / Floors</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </>
           ) : (
             <div className="flex items-center gap-2">
@@ -2353,14 +2561,6 @@ export default function FloorMapDesigner({
             </div>
           )}
 
-          <button 
-            onClick={() => setShowPreviewModal(true)}
-            className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Eye size={14} />
-            <span>Preview Layout</span>
-          </button>
-
           <input 
             type="file" 
             ref={fileInputRef} 
@@ -2369,28 +2569,10 @@ export default function FloorMapDesigner({
             className="hidden" 
           />
 
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Import and restore map JSON backup file"
-          >
-            <Upload size={14} />
-            <span>Restore JSON</span>
-          </button>
-
-          <button 
-            onClick={handleExportFloorJSON}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Export floor plan backup JSON"
-          >
-            <Download size={14} />
-            <span>Backup JSON</span>
-          </button>
-
-          {/* EXPAND FULL SCREEN BUTTON */}
+          {/* EXPAND FULL SCREEN BUTTON — kept visible, used constantly */}
           <button 
             onClick={toggleFullScreen}
-            className={`text-xs px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm ${
+            className={`text-xs px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shrink-0 ${
               isFullScreen 
                 ? "bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200" 
                 : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200"
@@ -2398,14 +2580,19 @@ export default function FloorMapDesigner({
             title="Expand floor designer to full screen mode for comfortable seating customization (ESC to exit)"
           >
             {isFullScreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            <span>{isFullScreen ? "Exit Full Screen" : "Expand Full Screen"}</span>
+            <span className="hidden lg:inline">{isFullScreen ? "Exit Full Screen" : "Expand Full Screen"}</span>
           </button>
         </div>
       </div>
 
       {/* WORKSPACE GRID: LEFT DOCK & RIGHT CANVAS */}
-      <div className={isFullScreen ? "flex-1 grid grid-cols-1 xl:grid-cols-5 gap-4 h-[calc(100vh-85px)] min-h-0 overflow-hidden" : "grid grid-cols-1 xl:grid-cols-4 gap-6"}>
-        {/* LEFT DOCK: SCOPE SELECTORS & DRAGGABLE PALETTE */}
+      <div className={
+        !showSidebarPalette
+          ? "grid grid-cols-1"
+          : isFullScreen ? "flex-1 grid grid-cols-1 xl:grid-cols-5 gap-4 h-[calc(100vh-85px)] min-h-0 overflow-hidden" : "grid grid-cols-1 xl:grid-cols-4 gap-6"
+      }>
+        {/* LEFT DOCK: SCOPE SELECTORS & DRAGGABLE PALETTE — hidden until Edit Map or explicitly shown */}
+        {showSidebarPalette && (
         <div className={isFullScreen ? "bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-md flex flex-col space-y-4 overflow-y-auto max-h-full xl:col-span-1 text-slate-100" : "bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col space-y-6"}>
           <div>
             <h4 className="text-sm font-bold text-slate-800 tracking-tight uppercase flex items-center gap-2">
@@ -3210,6 +3397,7 @@ export default function FloorMapDesigner({
             </div>
           )}
         </div>
+        )}
 
         {/* CENTRAL CANVAS */}
         <div className={isFullScreen ? "bg-slate-950 rounded-xl border border-slate-800 p-3 xl:col-span-4 flex flex-col space-y-2 h-full relative overflow-hidden" : "bg-slate-100 rounded-2xl border border-slate-200 p-4 xl:col-span-3 flex flex-col space-y-3 min-h-[580px] relative overflow-hidden"} id="floor-canvas-container">
@@ -3289,6 +3477,42 @@ export default function FloorMapDesigner({
                 <Users size={13} />
                 <span>All Managers ({managerList.length})</span>
               </button>
+
+              {/* Department Name Search for Zone Highlighting */}
+              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                matchingDepartmentZoneIds.size > 0
+                  ? "bg-indigo-100 border-indigo-300 text-indigo-900 shadow-xs"
+                  : isFullScreen ? "bg-slate-800 border-slate-700 text-slate-300" : "bg-indigo-50/70 border-indigo-200 text-indigo-900"
+              }`}>
+                <Building2 size={13} className="text-indigo-600 shrink-0" />
+                <input
+                  type="text"
+                  list="department-search-suggestions"
+                  value={departmentSearchQuery}
+                  onChange={(e) => setDepartmentSearchQuery(e.target.value)}
+                  placeholder="Search department..."
+                  className="text-[11px] font-bold bg-white text-slate-800 border border-slate-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-[130px]"
+                />
+                <datalist id="department-search-suggestions">
+                  {departmentList.map(dept => (
+                    <option key={dept} value={dept} />
+                  ))}
+                </datalist>
+                {departmentSearchQuery.trim() !== "" && (
+                  <>
+                    <span className="text-[9px] font-mono bg-indigo-600 text-white px-1.5 py-0.5 rounded-full font-extrabold">
+                      {matchingDepartmentSeatsCount} seat{matchingDepartmentSeatsCount === 1 ? "" : "s"}
+                    </span>
+                    <button
+                      onClick={() => setDepartmentSearchQuery("")}
+                      className="text-indigo-700 hover:text-indigo-900 font-bold cursor-pointer"
+                      title="Clear department search"
+                    >
+                      ✕
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Quick Stats */}
@@ -3473,6 +3697,8 @@ export default function FloorMapDesigner({
               {/* Draw current Floor Zones */}
               {currentZones.map((zone) => {
                 const isSelected = selectedElement?.type === "zone" && selectedElement.id === zone.id;
+                const isDeptSearchMatch = matchingDepartmentZoneIds.has(zone.id);
+                const isDeptSearchActive = departmentSearchQuery.trim() !== "";
                 return (
                   <div 
                     key={zone.id}
@@ -3489,10 +3715,13 @@ export default function FloorMapDesigner({
                       width: `${zone.width}px`,
                       height: `${zone.height}px`,
                       borderColor: zone.color,
-                      backgroundColor: `${zone.color}0c`
+                      backgroundColor: `${zone.color}0c`,
+                      opacity: isDeptSearchActive && !isDeptSearchMatch ? 0.35 : 1
                     }}
                     className={`border-2 rounded-2xl flex flex-col justify-between p-3.5 cursor-move transition-all group ${
-                      isSelected ? "ring-2 ring-blue-600 shadow-xl border-solid z-20" : "border-dashed hover:border-solid hover:bg-slate-400/5 z-0"
+                      isSelected ? "ring-2 ring-blue-600 shadow-xl border-solid z-20" 
+                        : isDeptSearchMatch ? "ring-2 ring-indigo-500 shadow-xl border-solid z-10 animate-pulse" 
+                        : "border-dashed hover:border-solid hover:bg-slate-400/5 z-0"
                     }`}
                   >
                     {/* Floating CAD Quick Actions Bar */}
@@ -3534,6 +3763,26 @@ export default function FloorMapDesigner({
                           ))}
                         </div>
                         <div className="w-px h-3 bg-slate-700 mx-0.5" />
+                        {zone.points && zone.points.length > 0 ? (
+                          <button
+                            onClick={() => resetZoneToRectangle(zone)}
+                            className="hover:bg-slate-800 text-sky-400 px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer"
+                            title="Reset back to a plain rectangle"
+                          >
+                            <Square size={11} />
+                            <span>Reset Shape</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => enableFreeformZone(zone)}
+                            className="hover:bg-slate-800 text-sky-400 px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer"
+                            title="Enable freeform corners — drag any point on the outline independently to curve or notch one side"
+                          >
+                            <Sliders size={11} />
+                            <span>Freeform Corners</span>
+                          </button>
+                        )}
+                        <div className="w-px h-3 bg-slate-700 mx-0.5" />
                         <button
                           onClick={() => handleDeleteCurrentSelection()}
                           className="hover:bg-red-600 text-red-300 hover:text-white px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer"
@@ -3545,8 +3794,40 @@ export default function FloorMapDesigner({
                       </div>
                     )}
 
-                    {/* 8 Interactive CAD Resize Handles */}
-                    {isSelected && canModifyCanvas && (
+                    {/* Freeform Curve Outline: smooth shape through the zone's custom points, drawn over the rectangle */}
+                    {zone.points && zone.points.length > 0 && (
+                      <svg
+                        className="absolute"
+                        style={{ left: 0, top: 0, width: `${zone.width}px`, height: `${zone.height}px`, overflow: "visible", pointerEvents: "none" }}
+                      >
+                        <path
+                          d={buildSmoothClosedPath(zone.points)}
+                          fill={`${zone.color}1a`}
+                          stroke={zone.color}
+                          strokeWidth={2}
+                          style={{ pointerEvents: isSelected && canModifyCanvas ? "stroke" : "none", cursor: isSelected && canModifyCanvas ? "copy" : "default" }}
+                          onDoubleClick={(e) => insertZoneVertexAtClick(e, zone)}
+                        />
+                      </svg>
+                    )}
+
+                    {/* Freeform Corner/Curve Drag Handles: each point moves independently — push one side in without moving the rest */}
+                    {isSelected && canModifyCanvas && zone.points && zone.points.length > 0 && (
+                      <>
+                        {zone.points.map((pt, idx) => (
+                          <div
+                            key={idx}
+                            onMouseDown={(e) => startDragZoneVertex(e, zone, idx)}
+                            style={{ left: `${pt.x}px`, top: `${pt.y}px` }}
+                            className="absolute -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-sky-600 rounded-full cursor-move z-30 hover:scale-125 transition-transform shadow-xs"
+                            title="Drag to push this point in or out independently"
+                          />
+                        ))}
+                      </>
+                    )}
+
+                    {/* 8 Interactive CAD Resize Handles (rectangle mode only) */}
+                    {isSelected && canModifyCanvas && (!zone.points || zone.points.length === 0) && (
                       <>
                         <div 
                           onMouseDown={(e) => startResizeZone(e, zone, "nw")}
@@ -3722,6 +4003,12 @@ export default function FloorMapDesigner({
                 const isGroupSelected = selectedSeatIds.includes(seat.id);
                 const isManagerMatch = isSeatOfSelectedManager(seat);
                 const isFilteringManager = selectedManagerFilter !== "All";
+                const isDeptSearchActive = departmentSearchQuery.trim() !== "";
+                const isDeptSeatMatch = isDeptSearchActive && (
+                  matchingDepartmentZoneIds.has(seat.zoneId) ||
+                  (seat.department || "").toLowerCase().includes(departmentSearchQuery.trim().toLowerCase()) ||
+                  (seat.allocatedDepartment || "").toLowerCase().includes(departmentSearchQuery.trim().toLowerCase())
+                );
                 
                 let statusBorder = "border-slate-300 bg-white hover:border-slate-500";
                 let badgeDot = "bg-slate-400";
@@ -3745,6 +4032,15 @@ export default function FloorMapDesigner({
                   }
                 }
 
+                let deptHighlightStyle = "";
+                if (isDeptSearchActive) {
+                  if (isDeptSeatMatch) {
+                    deptHighlightStyle = "ring-4 ring-indigo-500 border-indigo-600 bg-indigo-200/90 scale-110 z-40 shadow-xl";
+                  } else if (!isFilteringManager) {
+                    deptHighlightStyle = "opacity-30 grayscale-50";
+                  }
+                }
+
                 const bName = currentBuilding?.name || "Newmark _Hyderabad";
                 const fName = currentFloor?.name || "11 th Floor CRE";
                 const mgrName = seat.allocatedManager || seat.managerName || (seat.employeeName ? seat.employeeName : "Unassigned Manager");
@@ -3762,7 +4058,7 @@ export default function FloorMapDesigner({
                       top: `${seat.y}px`,
                       transform: `rotate(${seat.rotation || 0}deg)`
                     }}
-                    className={`w-11 h-11 border-2 rounded-xl flex flex-col items-center justify-center cursor-move shadow-2xs text-[9px] font-bold transition-all relative ${statusBorder} ${managerHighlightStyle} ${
+                    className={`w-11 h-11 border-2 rounded-xl flex flex-col items-center justify-center cursor-move shadow-2xs text-[9px] font-bold transition-all relative ${statusBorder} ${managerHighlightStyle} ${deptHighlightStyle} ${
                       isGroupSelected 
                         ? "ring-2 ring-blue-600 ring-offset-1 border-blue-600 bg-blue-100/90 scale-105 z-30 shadow-md" 
                         : isSingleSelected 
@@ -3770,7 +4066,7 @@ export default function FloorMapDesigner({
                         : ""
                     }`}
                   >
-                    <span className="text-slate-700 font-mono">{seat.seatNumber}</span>
+                    <span className={isDeptSeatMatch ? "text-indigo-900 font-mono text-[11px] font-extrabold" : "text-slate-700 font-mono"}>{seat.seatNumber}</span>
                     <span className="text-[7px] text-slate-400 truncate max-w-[36px] mt-0.5">{seat.type.substring(0,6)}</span>
                     <span className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ${badgeDot}`}></span>
                     {isGroupSelected && (
@@ -3781,6 +4077,19 @@ export default function FloorMapDesigner({
                     {isManagerMatch && isFilteringManager && (
                       <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-500 text-white font-mono text-[7px] font-extrabold px-1 py-0.2 rounded shadow-md border border-white z-50 whitespace-nowrap">
                         👑 MGR
+                      </span>
+                    )}
+                    {isDeptSeatMatch && !isManagerMatch && (
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white font-mono text-[7px] font-extrabold px-1 py-0.2 rounded shadow-md border border-white z-50 whitespace-nowrap">
+                        ✓ MATCH
+                      </span>
+                    )}
+                    {seat.isFixedSlot && (
+                      <span
+                        className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-slate-700 text-white rounded-full flex items-center justify-center shadow-sm border border-white z-40"
+                        title="Locked to this zone — won't be auto-reassigned"
+                      >
+                        <Lock size={8} strokeWidth={3} />
                       </span>
                     )}
                   </div>
@@ -3888,23 +4197,45 @@ export default function FloorMapDesigner({
                     <span>Allocate Dept & Manager</span>
                   </button>
 
-                  {/* Reassign Zone */}
+                  {/* Reassign & Lock to Zone */}
                   <select 
                     onChange={(e) => {
                       const newZoneId = e.target.value;
                       if (!newZoneId) return;
                       saveSnapshot();
-                      const updated = seats.map(s => selectedSeatIds.includes(s.id) ? { ...s, zoneId: newZoneId } : s);
+                      const newZoneName = currentZones.find(z => z.id === newZoneId)?.name || newZoneId;
+                      const updated = seats.map(s => selectedSeatIds.includes(s.id) ? { ...s, zoneId: newZoneId, isFixedSlot: true } : s);
                       onUpdateSeats(updated);
+                      if (onAddAuditLog) {
+                        onAddAuditLog("Bulk Lock Seats to Zone", "Floor Map", `Locked ${selectedSeatIds.length} seat(s) to zone "${newZoneName}".`);
+                      }
+                      e.target.value = "";
                     }}
                     className="bg-slate-800 text-slate-200 border border-slate-700 rounded-lg text-[11px] px-2 py-1.5 font-semibold focus:outline-none cursor-pointer"
                     defaultValue=""
+                    title="Assigns the selected seats to a zone and locks them there — they'll move with that zone and won't get auto-reassigned by drag-detection."
                   >
-                    <option value="" disabled>Reassign Zone...</option>
+                    <option value="" disabled>🔒 Lock Selected to Zone...</option>
                     {currentZones.map(z => (
                       <option key={z.id} value={z.id}>{z.name}</option>
                     ))}
                   </select>
+
+                  {/* Unlock Selected Seats */}
+                  <button
+                    onClick={() => {
+                      saveSnapshot();
+                      const updated = seats.map(s => selectedSeatIds.includes(s.id) ? { ...s, isFixedSlot: false } : s);
+                      onUpdateSeats(updated);
+                      if (onAddAuditLog) {
+                        onAddAuditLog("Bulk Unlock Seats", "Floor Map", `Unlocked ${selectedSeatIds.length} seat(s) from their zone.`);
+                      }
+                    }}
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-200 font-semibold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                    title="Unlock selected seats so they can be freely moved/reassigned again"
+                  >
+                    <span>🔓 Unlock</span>
+                  </button>
 
                   {/* Delete Group */}
                   <button 
