@@ -156,7 +156,7 @@ export default function ExcelUpload({
 
   // Download Bulk Department Seat Allocation Template (Seat Number, Department, Business Lead Name, Building, Floor, Zone)
   const handleDownloadSeatTemplate = () => {
-    downloadDepartmentSeatTemplate(onAddAuditLog);
+    downloadDepartmentSeatTemplate(onAddAuditLog, floors, buildings);
   };
 
   // Sample Scenarios Loader for Department Seat Allocation
@@ -549,6 +549,18 @@ export default function ExcelUpload({
               "Status", "Seat Status", "Occupancy Status", "Occupancy"
             ]);
 
+            const deskTypeVal = getFieldValue(row, [
+              "Desk Type", "Seat Type", "DeskType", "SeatType", "Desk_Type"
+            ]);
+            const normalizedDeskType = (() => {
+              const v = deskTypeVal.toLowerCase().trim();
+              if (v.includes("hot")) return "Hot Desk";
+              if (v.includes("exec")) return "Executive";
+              if (v.includes("collab")) return "Collaborative";
+              if (v.includes("standard")) return "Standard";
+              return null; // unspecified — keep whatever the matched seat already had, or default
+            })();
+
             if (!seatNum) {
               failedCount++;
               reports.push({
@@ -652,13 +664,14 @@ export default function ExcelUpload({
               allocatedManager: effectiveManager,
               managerName: effectiveManager,
               status: effectiveStatus,
+              type: (normalizedDeskType as Seat["type"]) || matchedSeat.type,
             } : {
               id: `seat-bulk-${Date.now()}-${idx}`,
               seatNumber: seatNum,
               buildingId: effectiveBuildingId,
               floorId: effectiveFloorId,
               zoneId: "z1",
-              type: "Standard",
+              type: (normalizedDeskType as Seat["type"]) || "Standard",
               status: effectiveStatus,
               department: effectiveDept,
               allocatedDepartment: effectiveDept,
@@ -955,7 +968,7 @@ export default function ExcelUpload({
                 className="text-xs font-bold text-emerald-800 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-colors font-sans"
               >
                 <Download size={14} className="text-emerald-600" />
-                <span>Download Seat Allocation Template (3 Columns)</span>
+                <span>Download Seat Allocation Template (with Dropdowns)</span>
               </button>
             )}
           </div>
@@ -996,7 +1009,7 @@ export default function ExcelUpload({
             <Building2 size={15} />
             <span>Bulk Department Seat Allocation (Excel)</span>
             <span className="bg-emerald-100 text-emerald-800 text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold">
-              3 Columns Only
+              Floor/Status/Type Dropdowns
             </span>
           </button>
         </div>
@@ -1115,7 +1128,7 @@ export default function ExcelUpload({
               >
                 <span>Load Sample Dept Seat Batch</span>
                 <span className="bg-emerald-800 text-emerald-100 px-1.5 py-0.5 rounded text-[9px] uppercase">
-                  3 Columns
+                  Dropdown-Ready
                 </span>
               </button>
             )}
@@ -1125,7 +1138,7 @@ export default function ExcelUpload({
           <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs font-sans text-slate-600">
             <h5 className="font-bold text-slate-800 flex items-center gap-1.5 text-[11px] uppercase">
               <Info size={14} className="text-blue-600" />
-              <span>{activeTab === "IT_ASSETS" ? "Supported Asset Fields" : "Strict 3-Column Template"}</span>
+              <span>{activeTab === "IT_ASSETS" ? "Supported Asset Fields" : "Template Columns"}</span>
             </h5>
             {activeTab === "IT_ASSETS" ? (
               <ul className="text-[10px] space-y-1 list-disc pl-3 text-slate-500">
@@ -1138,6 +1151,9 @@ export default function ExcelUpload({
                 <li><strong className="text-slate-900">1. Seat Number:</strong> E.g. A-101, B-202</li>
                 <li><strong className="text-slate-900">2. Department:</strong> E.g. Engineering, Sales</li>
                 <li><strong className="text-slate-900">3. Business Lead Name:</strong> E.g. Marcus Wright</li>
+                <li><strong className="text-slate-900">4-6. Building / Floor / Zone:</strong> Floor column has a dropdown of your workspace's actual current floors</li>
+                <li><strong className="text-slate-900">7. Seat Status:</strong> dropdown — Vacant, Occupied, or Reserved</li>
+                <li><strong className="text-slate-900">8. Desk Type:</strong> dropdown — Standard, Hot Desk, Executive, or Collaborative</li>
               </ul>
             )}
           </div>

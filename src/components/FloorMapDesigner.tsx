@@ -769,6 +769,7 @@ export default function FloorMapDesigner({
       return obj;
     });
     setLayoutObjects(updated);
+    if (onUpdateLayoutObjects) onUpdateLayoutObjects(updated);
     if (onAddAuditLog) onAddAuditLog("Enlarge Facility", "Layout Object", `Scaled facility size by ${(factor * 100).toFixed(0)}%`);
   };
 
@@ -1171,6 +1172,7 @@ export default function FloorMapDesigner({
 
     updateLocalObjects(last.objects);
     setLayoutObjects(last.objects);
+    if (onUpdateLayoutObjects) onUpdateLayoutObjects(last.objects);
 
     setUndoStack(prev => prev.slice(0, -1));
   };
@@ -1195,6 +1197,7 @@ export default function FloorMapDesigner({
 
     updateLocalObjects(next.objects);
     setLayoutObjects(next.objects);
+    if (onUpdateLayoutObjects) onUpdateLayoutObjects(next.objects);
 
     setRedoStack(prev => prev.slice(0, -1));
   };
@@ -1522,6 +1525,7 @@ export default function FloorMapDesigner({
         o.id === activeResizeObject.objectId ? { ...o, x: newX, y: newY, width: newW, height: newH } : o
       );
       setLayoutObjects(updatedObjects);
+      if (onUpdateLayoutObjects) onUpdateLayoutObjects(updatedObjects);
       return;
     }
 
@@ -1667,7 +1671,14 @@ export default function FloorMapDesigner({
     }
 
     if (hasDraggedObjectsRef.current) {
+      // BUGFIX: this used to only update the component's own internal
+      // `layoutObjects` state and never called the parent callback — so the
+      // move was never persisted to App.tsx/Firestore. Any later re-render
+      // then re-synced this component from the (still-stale) parent prop,
+      // snapping the object back to its pre-drag position. Zones and seats
+      // already called their parent callback here; objects now do too.
       setLayoutObjects(localObjectsRef.current);
+      if (onUpdateLayoutObjects) onUpdateLayoutObjects(localObjectsRef.current);
       hasDraggedObjectsRef.current = false;
     }
 
@@ -1788,6 +1799,7 @@ export default function FloorMapDesigner({
         y: clipboard.data.y + offsetY
       };
       setLayoutObjects([...layoutObjects, newObj]);
+      if (onUpdateLayoutObjects) onUpdateLayoutObjects([...layoutObjects, newObj]);
       setSelectedElement({ type: "object", id: newObj.id });
     }
   };
@@ -1805,6 +1817,7 @@ export default function FloorMapDesigner({
         o.id === selectedElement.id ? { ...o, rotation: (o.rotation + 90) % 360 } : o
       );
       setLayoutObjects(updated);
+      if (onUpdateLayoutObjects) onUpdateLayoutObjects(updated);
     }
   };
 
@@ -1831,9 +1844,12 @@ export default function FloorMapDesigner({
 
   const executeDeleteObject = (objId: string) => {
     saveSnapshot();
-    setLayoutObjects(prev => prev.filter(o => o.id !== objId));
+    const nextObjects = layoutObjects.filter(o => o.id !== objId);
+    setLayoutObjects(nextObjects);
+    if (onUpdateLayoutObjects) onUpdateLayoutObjects(nextObjects);
     setSelectedElement(null);
   };
+
 
   const executeDeleteGroupSeats = () => {
     saveSnapshot();
@@ -2541,7 +2557,7 @@ export default function FloorMapDesigner({
                         <FileSpreadsheet size={14} className="text-emerald-500" /><span>Import Excel Layout</span>
                       </button>
                       <button
-                        onClick={() => { setShowMoreToolsMenu(false); downloadDepartmentSeatTemplate(onAddAuditLog); }}
+                        onClick={() => { setShowMoreToolsMenu(false); downloadDepartmentSeatTemplate(onAddAuditLog, floors, buildings); }}
                         className="w-full px-3.5 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50 flex items-center gap-2.5 cursor-pointer text-left"
                       >
                         <Download size={14} className="text-teal-500" /><span>Download Excel Template</span>
@@ -3309,6 +3325,7 @@ export default function FloorMapDesigner({
                         saveSnapshot();
                         const updated = layoutObjects.map(obj => obj.id === activeObjectData.id ? { ...obj, name: e.target.value } : obj);
                         setLayoutObjects(updated);
+                        if (onUpdateLayoutObjects) onUpdateLayoutObjects(updated);
                       }}
                       className="w-full bg-white border border-slate-200 p-1.5 rounded-md text-xs font-semibold text-slate-700 disabled:bg-slate-50 disabled:text-slate-500"
                     />
@@ -3324,6 +3341,7 @@ export default function FloorMapDesigner({
                             saveSnapshot();
                             const updated = layoutObjects.map(obj => obj.id === activeObjectData.id ? { ...obj, type: e.target.value as any } : obj);
                             setLayoutObjects(updated);
+                            if (onUpdateLayoutObjects) onUpdateLayoutObjects(updated);
                           }}
                           className="w-full bg-white border border-slate-200 p-1.5 rounded-md text-xs font-medium text-slate-700"
                         >
@@ -3384,6 +3402,7 @@ export default function FloorMapDesigner({
                                 const val = Math.max(20, parseInt(e.target.value) || 20);
                                 const updated = layoutObjects.map(obj => obj.id === activeObjectData.id ? { ...obj, width: val } : obj);
                                 setLayoutObjects(updated);
+                                if (onUpdateLayoutObjects) onUpdateLayoutObjects(updated);
                               }}
                               className="w-full bg-white border border-purple-200 p-1 rounded font-mono text-xs font-bold text-slate-800"
                             />
@@ -3398,6 +3417,7 @@ export default function FloorMapDesigner({
                                 const val = Math.max(20, parseInt(e.target.value) || 20);
                                 const updated = layoutObjects.map(obj => obj.id === activeObjectData.id ? { ...obj, height: val } : obj);
                                 setLayoutObjects(updated);
+                                if (onUpdateLayoutObjects) onUpdateLayoutObjects(updated);
                               }}
                               className="w-full bg-white border border-purple-200 p-1 rounded font-mono text-xs font-bold text-slate-800"
                             />
@@ -4144,9 +4164,9 @@ export default function FloorMapDesigner({
                     )}
 
                     <div className="flex justify-between items-start pointer-events-none">
-                      <div>
+                      <div className="min-w-0 pr-1">
                         <span className="text-[10px] font-bold uppercase text-slate-400 block tracking-wide">Zone</span>
-                        <h5 className="text-[11px] font-bold text-slate-800 line-clamp-1">{zone.name}</h5>
+                        <h5 className="text-[11px] font-bold text-slate-800 line-clamp-2 leading-snug break-words" title={zone.name}>{zone.name}</h5>
                       </div>
                       <span 
                         className="w-2.5 h-2.5 rounded-full shrink-0" 
@@ -4328,7 +4348,8 @@ export default function FloorMapDesigner({
                 const bName = currentBuilding?.name || "Newmark _Hyderabad";
                 const fName = currentFloor?.name || "11 th Floor CRE";
                 const mgrName = seat.allocatedManager || seat.managerName || (seat.employeeName ? seat.employeeName : "Unassigned Manager");
-                const seatIdentityTitle = `${bName} • ${seat.seatNumber} • ${mgrName} • ${fName}`;
+                const deptName = seat.allocatedDepartment || seat.department || "No Department Assigned";
+                const seatIdentityTitle = `${seat.seatNumber} • ${deptName} • ${mgrName} • ${bName} - ${fName} • ${seat.status}`;
 
                 return (
                   <div 
@@ -5430,7 +5451,7 @@ export default function FloorMapDesigner({
                       </p>
                     </div>
                     <button
-                      onClick={() => downloadDepartmentSeatTemplate(onAddAuditLog)}
+                      onClick={() => downloadDepartmentSeatTemplate(onAddAuditLog, floors, buildings)}
                       className="w-full bg-white hover:bg-teal-100 text-teal-700 border border-teal-300 text-xs font-bold py-1.5 rounded-lg flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
                     >
                       <Download size={13} />
@@ -5835,6 +5856,7 @@ export default function FloorMapDesigner({
                   saveSnapshot();
                   const updated = layoutObjects.map(o => o.id === editingObjectModal.id ? editingObjectModal : o);
                   setLayoutObjects(updated);
+                  if (onUpdateLayoutObjects) onUpdateLayoutObjects(updated);
                   setEditingObjectModal(null);
                   if (onAddAuditLog) onAddAuditLog("Edit Facility Properties", "Layout Object", `Updated facility "${editingObjectModal.name}" (${editingObjectModal.width}x${editingObjectModal.height}px)`);
                 }}
@@ -6238,7 +6260,9 @@ export default function FloorMapDesigner({
             onUpdateZones([...zones.filter(z => z.floorId !== targetFloorId), ...pendingUploadData.zones.map(z => ({ ...z, floorId: targetFloorId }))]);
             onUpdateSeats([...seats.filter(s => s.floorId !== targetFloorId), ...pendingUploadData.seats.map(s => ({ ...s, floorId: targetFloorId }))]);
             if (pendingUploadData.objects) {
-              setLayoutObjects(prev => [...prev.filter(o => o.floorId !== targetFloorId), ...pendingUploadData.objects!.map(o => ({ ...o, floorId: targetFloorId }))]);
+              const nextObjects = [...layoutObjects.filter(o => o.floorId !== targetFloorId), ...pendingUploadData.objects!.map(o => ({ ...o, floorId: targetFloorId }))];
+              setLayoutObjects(nextObjects);
+              if (onUpdateLayoutObjects) onUpdateLayoutObjects(nextObjects);
             }
           }
           setIsReplaceModalOpen(false);

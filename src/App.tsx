@@ -473,7 +473,8 @@ export default function App() {
         capacity: data.extractedSeats.length,
         zonesCount: data.extractedZones.length,
         isArchived: false,
-        lastModified: new Date().toISOString().split("T")[0]
+        lastModified: new Date().toISOString().split("T")[0],
+        organizationId: myOrgId
       };
       finalFloorId = newFloorId;
       finalFloorName = newFloor.name;
@@ -522,7 +523,8 @@ export default function App() {
     const newZones = data.extractedZones.map(z => ({
       ...z,
       floorId: finalFloorId!,
-      id: z.id.includes(finalFloorId!) ? z.id : `${finalFloorId}-${z.id}`
+      id: z.id.includes(finalFloorId!) ? z.id : `${finalFloorId}-${z.id}`,
+      organizationId: z.organizationId || myOrgId
     }));
     const updatedZones = [...zones.filter(z => z.floorId !== finalFloorId), ...newZones];
     setZones(updatedZones);
@@ -534,7 +536,8 @@ export default function App() {
       ...s,
       floorId: finalFloorId!,
       buildingId: data.targetBuildingId,
-      id: s.id.includes(finalFloorId!) ? s.id : `${finalFloorId}-seat-${idx + 1}`
+      id: s.id.includes(finalFloorId!) ? s.id : `${finalFloorId}-seat-${idx + 1}`,
+      organizationId: s.organizationId || myOrgId
     }));
     const updatedSeats = [...seats.filter(s => s.floorId !== finalFloorId), ...newSeats];
     setSeats(updatedSeats);
@@ -546,7 +549,8 @@ export default function App() {
       const newObjects = data.layoutObjects.map((o, idx) => ({
         ...o,
         floorId: finalFloorId!,
-        id: o.id && o.id.includes(finalFloorId!) ? o.id : `${finalFloorId}-obj-${idx + 1}`
+        id: o.id && o.id.includes(finalFloorId!) ? o.id : `${finalFloorId}-obj-${idx + 1}`,
+        organizationId: o.organizationId || myOrgId
       }));
       const updatedObjects = [...layoutObjects.filter(o => o.floorId !== finalFloorId), ...newObjects];
       setLayoutObjects(updatedObjects);

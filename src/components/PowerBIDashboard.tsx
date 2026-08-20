@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import PptxGenJS from "pptxgenjs";
 import { 
   BarChart3, 
   TrendingUp, 
@@ -18,6 +19,9 @@ import {
   AlertTriangle,
   Laptop,
   MapPin,
+  Presentation,
+  Code2,
+  ChevronDown,
   SlidersHorizontal,
   ArrowUpRight,
   ShieldAlert,
@@ -457,6 +461,152 @@ export default function PowerBIDashboard({
     document.body.removeChild(link);
   };
 
+  // ------------------------------------------------------------------
+  // PowerPoint (.pptx) Export — a short executive deck built client-side
+  // ------------------------------------------------------------------
+  const handleExportPowerBIReportPPT = async () => {
+    const pptx = new PptxGenJS();
+    pptx.author = "EnterprizSeat Platform";
+    pptx.title = "Corporate Occupancy & IT Asset Executive Report";
+
+    // Title slide
+    const titleSlide = pptx.addSlide();
+    titleSlide.background = { color: "0F172A" };
+    titleSlide.addText("Corporate Occupancy & IT Asset\nExecutive Analytics Report", {
+      x: 0.6, y: 1.6, w: 9, h: 1.6, fontSize: 28, bold: true, color: "FFFFFF", fontFace: "Arial"
+    });
+    titleSlide.addText(
+      `Building: ${selectedBuilding}  •  Floor: ${selectedFloor}  •  Dept: ${selectedDept}  •  Timeline: ${selectedTimeline}\nGenerated ${new Date().toLocaleString()}`,
+      { x: 0.6, y: 3.3, w: 9, h: 0.8, fontSize: 12, color: "94A3B8" }
+    );
+
+    // KPI slide
+    const kpiSlide = pptx.addSlide();
+    kpiSlide.addText("Summary KPI Metrics", { x: 0.4, y: 0.3, w: 9, h: 0.5, fontSize: 20, bold: true, color: "1E293B" });
+    const kpiRows = [
+      ["Metric", "Value"],
+      ["Total Filtered Seats", String(totalSeatsCount)],
+      ["Occupied Seats", String(occupiedSeatsCount)],
+      ["Vacant Seats", String(vacantSeatsCount)],
+      ["Reserved Seats", String(reservedSeatsCount)],
+      ["Overall Occupancy Rate", `${occupancyRate}%`],
+      ["IT Assets Total", String(totalAssetsCount)],
+      ["IT Asset Linking Compliance", `${assetLinkingRate}%`],
+      ["Pending Allocation Requests", String(pendingRequestsCount)]
+    ];
+    kpiSlide.addTable(kpiRows as any, {
+      x: 0.4, y: 1.0, w: 9, colW: [6, 3],
+      fontSize: 12, border: { type: "solid", color: "E2E8F0", pt: 1 },
+      fill: { color: "F8FAFC" },
+      color: "334155"
+    });
+
+    // Seat allocation matrix slide(s) — chunked so no slide overflows
+    const chunkSize = 18;
+    for (let i = 0; i < matrixSeatsList.length; i += chunkSize) {
+      const chunk = matrixSeatsList.slice(i, i + chunkSize);
+      const slide = pptx.addSlide();
+      slide.addText(`Seat Allocation Matrix ${matrixSeatsList.length > chunkSize ? `(${i + 1}-${Math.min(i + chunkSize, matrixSeatsList.length)} of ${matrixSeatsList.length})` : ""}`, {
+        x: 0.4, y: 0.3, w: 9, h: 0.5, fontSize: 16, bold: true, color: "1E293B"
+      });
+      const rows = [["Seat", "Zone", "Status", "Type", "Employee", "Department"]];
+      chunk.forEach(s => {
+        const pZone = zones.find(z => z.id === s.zoneId);
+        rows.push([
+          s.seatNumber,
+          pZone?.name || "Zone A",
+          s.status,
+          s.type,
+          s.employeeName || "Unassigned",
+          s.department || pZone?.department || "N/A"
+        ]);
+      });
+      slide.addTable(rows as any, {
+        x: 0.3, y: 0.9, w: 9.4,
+        fontSize: 9, border: { type: "solid", color: "E2E8F0", pt: 0.5 },
+        color: "334155"
+      });
+    }
+
+    await pptx.writeFile({ fileName: `PowerBI_Report_${selectedBuilding.replace(/\s+/g, '_')}_${Date.now()}.pptx` });
+  };
+
+  // ------------------------------------------------------------------
+  // Standalone HTML Report Export — a single self-contained .html file
+  // ------------------------------------------------------------------
+  const handleExportPowerBIReportHTML = () => {
+    const rowsHtml = matrixSeatsList.map(s => {
+      const pZone = zones.find(z => z.id === s.zoneId);
+      return `<tr>
+        <td>${s.seatNumber}</td>
+        <td>${pZone?.name || "Zone A"}</td>
+        <td><span class="badge badge-${(s.status || "").toLowerCase()}">${s.status}</span></td>
+        <td>${s.type}</td>
+        <td>${s.employeeName || "Unassigned"}</td>
+        <td>${s.department || pZone?.department || "N/A"}</td>
+      </tr>`;
+    }).join("\n");
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Corporate Occupancy & IT Asset Executive Report</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; background: #f8fafc; color: #1e293b; margin: 0; padding: 32px; }
+  .header { background: #0f172a; color: white; padding: 28px 32px; border-radius: 16px; margin-bottom: 24px; }
+  .header h1 { margin: 0 0 6px; font-size: 22px; }
+  .header p { margin: 0; color: #94a3b8; font-size: 13px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
+  .kpi-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
+  .kpi-card .label { font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: bold; letter-spacing: 0.03em; }
+  .kpi-card .value { font-size: 24px; font-weight: bold; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  th, td { text-align: left; padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+  th { background: #f1f5f9; text-transform: uppercase; font-size: 10px; color: #64748b; letter-spacing: 0.03em; }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: bold; }
+  .badge-occupied { background: #fee2e2; color: #b91c1c; }
+  .badge-vacant { background: #dcfce7; color: #15803d; }
+  .badge-reserved { background: #fef9c3; color: #a16207; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>Corporate Occupancy & IT Asset Executive Analytics Report</h1>
+    <p>Building: ${selectedBuilding} &nbsp;•&nbsp; Floor: ${selectedFloor} &nbsp;•&nbsp; Dept: ${selectedDept} &nbsp;•&nbsp; Timeline: ${selectedTimeline} &nbsp;•&nbsp; Generated ${new Date().toLocaleString()}</p>
+  </div>
+  <div class="kpi-grid">
+    <div class="kpi-card"><div class="label">Total Seats</div><div class="value">${totalSeatsCount}</div></div>
+    <div class="kpi-card"><div class="label">Occupied</div><div class="value">${occupiedSeatsCount}</div></div>
+    <div class="kpi-card"><div class="label">Vacant</div><div class="value">${vacantSeatsCount}</div></div>
+    <div class="kpi-card"><div class="label">Reserved</div><div class="value">${reservedSeatsCount}</div></div>
+    <div class="kpi-card"><div class="label">Occupancy Rate</div><div class="value">${occupancyRate}%</div></div>
+    <div class="kpi-card"><div class="label">IT Assets Total</div><div class="value">${totalAssetsCount}</div></div>
+    <div class="kpi-card"><div class="label">Asset Linking Compliance</div><div class="value">${assetLinkingRate}%</div></div>
+    <div class="kpi-card"><div class="label">Pending Requests</div><div class="value">${pendingRequestsCount}</div></div>
+  </div>
+  <table>
+    <thead><tr><th>Seat</th><th>Zone</th><th>Status</th><th>Type</th><th>Employee</th><th>Department</th></tr></thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `PowerBI_Report_${selectedBuilding.replace(/\s+/g, '_')}_${Date.now()}.html`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
   return (
     <div className="space-y-6 font-sans text-slate-800" id="powerbi-module">
       
@@ -492,13 +642,41 @@ export default function PowerBIDashboard({
             <span className="hidden sm:inline">Refresh Data</span>
           </button>
 
-          <button 
-            onClick={handleExportPowerBIReport}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2 rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 shadow-md hover:shadow-amber-500/20 transition-all"
-          >
-            <Download size={14} />
-            <span>Export Power BI CSV</span>
-          </button>
+          <div className="relative">
+            <button 
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2 rounded-xl text-xs font-bold font-sans flex items-center gap-1.5 shadow-md hover:shadow-amber-500/20 transition-all cursor-pointer"
+            >
+              <Download size={14} />
+              <span>Export Report</span>
+              <ChevronDown size={13} className={`transition-transform ${showExportMenu ? "rotate-180" : ""}`} />
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden z-50">
+                <button
+                  onClick={() => { handleExportPowerBIReport(); setShowExportMenu(false); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                >
+                  <FileText size={14} className="text-emerald-600" />
+                  <span>Export as CSV</span>
+                </button>
+                <button
+                  onClick={async () => { setShowExportMenu(false); await handleExportPowerBIReportPPT(); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer border-t border-slate-100"
+                >
+                  <Presentation size={14} className="text-orange-600" />
+                  <span>Export as PowerPoint (.pptx)</span>
+                </button>
+                <button
+                  onClick={() => { handleExportPowerBIReportHTML(); setShowExportMenu(false); }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer border-t border-slate-100"
+                >
+                  <Code2 size={14} className="text-blue-600" />
+                  <span>Export as HTML Report</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
