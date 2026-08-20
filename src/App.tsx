@@ -54,6 +54,7 @@ import {
   deleteFirestoreBatch
 } from "./lib/firestoreSync";
 import { orderBy, limit } from "firebase/firestore";
+import { authReady } from "./lib/firebase";
 
 import { 
   Grid, 
@@ -760,8 +761,22 @@ export default function App() {
   // Real-Time Firestore Synchronization for Dev & Published Apps
   useEffect(() => {
     let isMounted = true;
+    // BUGFIX: Firestore listeners used to attach immediately on mount, before
+    // the app's anonymous auth sign-in had actually completed. Since that
+    // sign-in is asynchronous, there was a real window on every page load
+    // where these reads ran unauthenticated. Depending on timing, that could
+    // surface as a snapshot that looked empty/denied, which briefly (or, on
+    // a slow/flaky connection, not-so-briefly) rendered the dashboard as if
+    // all data had been wiped — even though the real data was untouched in
+    // Firestore the whole time. Waiting for authReady removes that window
+    // entirely: nothing subscribes until the app actually has a signed-in
+    // Firestore session.
+    let unsubFns: Array<() => void> = [];
 
-    const unsubUsers = subscribeToCollection<UserAccount>("users", (items) => {
+    authReady.then(() => {
+      if (!isMounted) return;
+
+      const unsubUsers = subscribeToCollection<UserAccount>("users", (items) => {
       if (isMounted && Array.isArray(items)) {
         setUsers(items);
         setEncryptedStorage('users', items);
@@ -777,6 +792,7 @@ export default function App() {
 
     const unsubEmployees = subscribeToCollection<EmployeeProfile>("employees", (items) => {
       if (isMounted && Array.isArray(items)) {
+
         setEmployees(items);
         setEncryptedStorage('employees', items);
       }
@@ -876,20 +892,16 @@ export default function App() {
       }
     }, initialLayoutObjects);
 
+      unsubFns = [
+        unsubUsers, unsubOrganizations, unsubEmployees, unsubBuildings, unsubFloors,
+        unsubZones, unsubSeats, unsubRequests, unsubCheckInLogs, unsubAuditLogs,
+        unsubAssets, unsubLayoutObjects
+      ];
+    });
+
     return () => {
       isMounted = false;
-      unsubUsers();
-      unsubOrganizations();
-      unsubEmployees();
-      unsubBuildings();
-      unsubFloors();
-      unsubZones();
-      unsubSeats();
-      unsubRequests();
-      unsubCheckInLogs();
-      unsubAuditLogs();
-      unsubAssets();
-      unsubLayoutObjects();
+      unsubFns.forEach(fn => fn());
     };
   }, []);
 
