@@ -15,7 +15,10 @@ import {
   CheckCircle,
   HelpCircle,
   LogOut,
-  Sparkles
+  Sparkles,
+  Apple,
+  PlayCircle,
+  Link as LinkIcon
 } from "lucide-react";
 
 interface MobileSimulatorProps {
@@ -47,6 +50,19 @@ export default function MobileSimulator({ seats, currentUser, onAddRequest, onCh
     "Push Alert: Seat A-101 allocated by Sarah Connor.",
     "Reminder: Checkout mandated before 07:00 PM tonight."
   ]);
+
+  // Mobile app download links — placeholders until the real listings go live;
+  // update these once the app is published to each store.
+  const appStoreUrl = "https://apps.apple.com/app/enterprizseat";
+  const playStoreUrl = "https://play.google.com/store/apps/details?id=com.enterprizseat.app";
+  const installLink = "https://get.enterprizseat.app";
+  const [linkCopied, setLinkCopied] = useState(false);
+  const handleCopyInstallLink = () => {
+    navigator.clipboard.writeText(installLink).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    }).catch(() => {});
+  };
 
   // Find user's seat if assigned
   const effectiveName = currentUser?.name || userName;
@@ -147,6 +163,57 @@ export default function MobileSimulator({ seats, currentUser, onAddRequest, onCh
             {notifications.map((notif, idx) => (
               <p key={idx} className="text-[10px] text-slate-300 border-b border-slate-800 pb-1.5 leading-normal">{notif}</p>
             ))}
+          </div>
+        </div>
+
+        {/* Get the Mobile App */}
+        <div className="bg-gradient-to-br from-blue-700 to-indigo-800 rounded-2xl p-4 text-white space-y-3 shadow-md" id="mobile-download-card">
+          <div className="flex items-center gap-2">
+            <Smartphone size={16} />
+            <span className="text-xs font-bold">Get the Mobile App</span>
+          </div>
+          <p className="text-[10px] text-blue-100 leading-relaxed">
+            Employees can install the real companion app on their phone to check in, scan desk QR labels, and get push alerts — this panel is just an in-browser simulator for testing.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <a
+              href={appStoreUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-3 py-2 flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              <Apple size={16} />
+              <div className="text-left leading-none">
+                <span className="block text-[8px] text-blue-200 uppercase tracking-wide">Download on the</span>
+                <span className="block text-[11px] font-bold">App Store</span>
+              </div>
+            </a>
+            <a
+              href={playStoreUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-3 py-2 flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              <PlayCircle size={16} />
+              <div className="text-left leading-none">
+                <span className="block text-[8px] text-blue-200 uppercase tracking-wide">Get it on</span>
+                <span className="block text-[11px] font-bold">Google Play</span>
+              </div>
+            </a>
+          </div>
+          <div className="flex items-center gap-2 bg-white/10 border border-white/20 rounded-xl px-3 py-2">
+            <LinkIcon size={13} className="text-blue-200 shrink-0" />
+            <input
+              readOnly
+              value={installLink}
+              className="flex-1 bg-transparent text-[10px] font-mono text-blue-50 focus:outline-none truncate"
+            />
+            <button
+              onClick={handleCopyInstallLink}
+              className="text-[9px] font-bold bg-white text-blue-800 px-2 py-1 rounded-lg cursor-pointer hover:bg-blue-50 shrink-0"
+            >
+              {linkCopied ? "Copied!" : "Copy"}
+            </button>
           </div>
         </div>
       </div>

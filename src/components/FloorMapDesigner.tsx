@@ -3177,20 +3177,34 @@ export default function FloorMapDesigner({
                       <label className="text-[10px] text-slate-600 font-bold uppercase block">Allocate Department</label>
                       <input
                         type="text"
-                        placeholder="e.g. Engineering, Finance, IT"
+                        placeholder="e.g. Engineering, Finance, IT — or type Vacant to clear this seat"
                         value={activeSeatData.allocatedDepartment || activeSeatData.department || ""}
                         disabled={!canEditLayout}
                         onChange={(e) => {
                           if (!canEditLayout) return;
                           saveSnapshot();
                           const deptVal = e.target.value;
-                          const updated = seats.map(s => s.id === activeSeatData.id ? { 
-                            ...s, 
-                            allocatedDepartment: deptVal, 
-                            department: deptVal,
-                            isFixedSlot: true,
-                            status: s.status === "Vacant" ? "Reserved" : s.status
-                          } : s);
+                          const isVacant = deptVal.trim().toLowerCase() === "vacant";
+                          const updated = seats.map(s => s.id === activeSeatData.id ? (
+                            isVacant ? {
+                              ...s,
+                              allocatedDepartment: "",
+                              department: "",
+                              allocatedManager: "",
+                              managerName: "",
+                              isFixedSlot: false,
+                              employeeName: undefined,
+                              employeeId: undefined,
+                              employeeEmail: undefined,
+                              status: "Vacant" as const
+                            } : {
+                              ...s,
+                              allocatedDepartment: deptVal,
+                              department: deptVal,
+                              isFixedSlot: true,
+                              status: s.status === "Vacant" ? "Reserved" as const : s.status
+                            }
+                          ) : s);
                           onUpdateSeats(updated);
                         }}
                         className="w-full bg-white border border-slate-200 p-1.5 rounded-md text-xs font-semibold text-slate-800 disabled:bg-slate-50"

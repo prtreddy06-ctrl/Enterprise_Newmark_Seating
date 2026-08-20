@@ -611,8 +611,10 @@ export default function PowerBIDashboard({
     <div className="space-y-6 font-sans text-slate-800" id="powerbi-module">
       
       {/* Power BI Application Chrome Topbar */}
-      <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-start md:items-center justify-between border border-slate-800 shadow-xl relative overflow-hidden" id="powerbi-chrome-header">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none"></div>
+      <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-2xl flex flex-col md:flex-row gap-4 items-start md:items-center justify-between border border-slate-800 shadow-xl relative" id="powerbi-chrome-header">
+        <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl"></div>
+        </div>
 
         <div className="flex items-center gap-3.5 z-10">
           <div className="bg-amber-400 text-slate-950 font-extrabold px-3 py-1.5 rounded-xl text-xs tracking-wider shadow-sm flex items-center gap-1.5 font-display">
@@ -691,13 +693,13 @@ export default function PowerBIDashboard({
           {/* Building Slicer */}
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
             <Building2 size={13} className="text-slate-400" />
-            <span className="text-[11px] text-slate-400 font-medium">Campus:</span>
+            <span className="text-[11px] text-slate-400 font-medium">Building:</span>
             <select 
               value={selectedBuilding}
               onChange={(e) => setSelectedBuilding(e.target.value)}
               className="bg-transparent text-slate-800 font-semibold focus:outline-none text-xs cursor-pointer"
             >
-              <option value="All">All Campuses</option>
+              <option value="All">All Buildings</option>
               {buildings.map(b => (
                 <option key={b.id} value={b.name}>{b.name}</option>
               ))}

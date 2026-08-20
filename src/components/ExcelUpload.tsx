@@ -19,7 +19,7 @@ import {
   Layers
 } from "lucide-react";
 import * as XLSX from "xlsx";
-import { ITAsset, Seat, EmployeeProfile, AssetExcelImportResult, Floor, Building } from "../types";
+import { ITAsset, Seat, EmployeeProfile, AssetExcelImportResult, Floor, Building, Zone } from "../types";
 import { downloadDepartmentSeatTemplate } from "../utils/excelTemplates";
 
 /**
@@ -78,6 +78,7 @@ interface ExcelUploadProps {
   onAddAuditLog: (action: string, category: any, details: string) => void;
   floors?: Floor[];
   buildings?: Building[];
+  zones?: Zone[];
 }
 
 interface RawAssetRow {
@@ -128,7 +129,8 @@ export default function ExcelUpload({
   activeRole,
   onAddAuditLog,
   floors = [],
-  buildings = []
+  buildings = [],
+  zones = []
 }: ExcelUploadProps) {
   const [activeTab, setActiveTab] = useState<"IT_ASSETS" | "DEPT_SEATS">("IT_ASSETS");
   const [fileName, setFileName] = useState<string>("");
@@ -573,7 +575,7 @@ export default function ExcelUpload({
               return;
             }
 
-            const isDeptVacant = dept.toLowerCase() === "vacant" || statusVal.toLowerCase() === "vacant";
+            const isDeptVacant = dept.trim().toLowerCase() === "vacant" || statusVal.trim().toLowerCase() === "vacant";
 
             if (!dept && !statusVal) {
               failedCount++;
@@ -634,8 +636,55 @@ export default function ExcelUpload({
               );
             });
 
-            const effectiveDept = isDeptVacant ? "Vacant" : dept;
-            const effectiveManager = leadName || (matchedSeat ? matchedSeat.allocatedManager || matchedSeat.managerName : "Department Head");
+            // ------------------------------------------------------------------
+            // Auto-assign a zone by seat number — the "Zone" column in the sheet
+            // is optional. If the seat already exists we keep its current zone
+            // untouched. For a brand-new seat, we find the numerically closest
+            // seat already placed on this floor and adopt its zone (seats with
+            // nearby numbers are almost always grouped in the same zone), only
+            // falling back to an explicit "Zone" column value or the floor's
+            // first zone if there's nothing nearby to go on.
+            const extractSeatDigits = (num: string): number | null => {
+              const match = num.match(/(\d+)/);
+              return match ? parseInt(match[1], 10) : null;
+            };
+            const rowZoneVal = getFieldValue(row, ["Zone", "Zone Name", "Zone ID"]);
+            const computeAutoZoneId = (): string => {
+              if (rowZoneVal) {
+                const matchedZone = zones.find(z =>
+                  z.floorId === effectiveFloorId &&
+                  (z.name.toLowerCase() === rowZoneVal.toLowerCase() || z.id.toLowerCase() === rowZoneVal.toLowerCase())
+                );
+                if (matchedZone) return matchedZone.id;
+              }
+
+              const targetDigits = extractSeatDigits(cleanSeatNum);
+              if (targetDigits !== null) {
+                const floorSeats = allCurrentSeats.filter(s => s.floorId === effectiveFloorId && s.zoneId);
+                let closestSeat: Seat | null = null;
+                let closestDistance = Infinity;
+                floorSeats.forEach(s => {
+                  const seatDigits = extractSeatDigits(s.seatNumber);
+                  if (seatDigits === null) return;
+                  const distance = Math.abs(seatDigits - targetDigits);
+                  if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestSeat = s;
+                  }
+                });
+                if (closestSeat) return (closestSeat as Seat).zoneId;
+              }
+
+              const firstFloorZone = zones.find(z => z.floorId === effectiveFloorId);
+              return firstFloorZone?.id || "z1";
+            };
+
+            const effectiveDept = isDeptVacant ? "" : dept;
+            // A row explicitly marked Vacant means "nobody is assigned here" —
+            // don't carry over a Business Lead Name or a previously matched
+            // seat's manager/employee, or this seat would still look reserved
+            // for a department even though it's supposed to be open.
+            const effectiveManager = isDeptVacant ? "" : (leadName || (matchedSeat ? matchedSeat.allocatedManager || matchedSeat.managerName : "Department Head"));
 
             const isFutureExpansion = dept.toLowerCase().includes("expansion") || dept.toLowerCase().includes("future");
             const hasAssignedPerson = Boolean(getFieldValue(row, ["Employee", "Employee Name", "Employee ID", "Occupant", "Assigned To"]));
@@ -665,12 +714,15 @@ export default function ExcelUpload({
               managerName: effectiveManager,
               status: effectiveStatus,
               type: (normalizedDeskType as Seat["type"]) || matchedSeat.type,
+              // Clearing a seat back to Vacant also clears whoever it was
+              // fixed/locked to, and any leftover employee/occupant fields.
+              ...(isDeptVacant ? { isFixedSlot: false, employeeName: undefined, employeeId: undefined, employeeEmail: undefined } : {})
             } : {
               id: `seat-bulk-${Date.now()}-${idx}`,
               seatNumber: seatNum,
               buildingId: effectiveBuildingId,
               floorId: effectiveFloorId,
-              zoneId: "z1",
+              zoneId: computeAutoZoneId(),
               type: (normalizedDeskType as Seat["type"]) || "Standard",
               status: effectiveStatus,
               department: effectiveDept,
@@ -1151,7 +1203,8 @@ export default function ExcelUpload({
                 <li><strong className="text-slate-900">1. Seat Number:</strong> E.g. A-101, B-202</li>
                 <li><strong className="text-slate-900">2. Department:</strong> E.g. Engineering, Sales</li>
                 <li><strong className="text-slate-900">3. Business Lead Name:</strong> E.g. Marcus Wright</li>
-                <li><strong className="text-slate-900">4-6. Building / Floor / Zone:</strong> Floor column has a dropdown of your workspace's actual current floors</li>
+                <li><strong className="text-slate-900">4-5. Building / Floor:</strong> Floor column has a dropdown of your workspace's actual current floors</li>
+                <li><strong className="text-slate-900">6. Zone:</strong> optional — leave blank and it's auto-assigned from nearby seat numbers already on that floor</li>
                 <li><strong className="text-slate-900">7. Seat Status:</strong> dropdown — Vacant, Occupied, or Reserved</li>
                 <li><strong className="text-slate-900">8. Desk Type:</strong> dropdown — Standard, Hot Desk, Executive, or Collaborative</li>
               </ul>

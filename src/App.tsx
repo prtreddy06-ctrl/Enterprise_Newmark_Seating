@@ -2221,6 +2221,7 @@ export default function App() {
               onAddAuditLog={logAuditAction}
               floors={floorsInOrg}
               buildings={buildingsInOrg}
+              zones={zonesInOrg}
             />
           )}
 

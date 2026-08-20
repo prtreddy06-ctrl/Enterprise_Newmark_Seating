@@ -38,7 +38,7 @@ export async function downloadDepartmentSeatTemplate(
     { header: "Business Lead Name", key: "businessLead", width: 26 },
     { header: "Building", key: "building", width: 22 },
     { header: "Floor", key: "floor", width: 30 },
-    { header: "Zone", key: "zone", width: 22 },
+    { header: "Zone (optional — auto-assigned by seat number if left blank)", key: "zone", width: 44 },
     { header: "Seat Status", key: "seatStatus", width: 16 },
     { header: "Desk Type", key: "deskType", width: 16 }
   ];
