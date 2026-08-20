@@ -22,7 +22,7 @@ import {
   Globe
 } from "lucide-react";
 import { Zone, Seat, Building, Floor, LocationSite, AiReaderCopy } from "../types";
-import { generateNewmarkBlueprintData } from "../data/newmarkFloorGenerator";
+import { extractBlueprintFromPdf } from "../utils/pdfBlueprintExtractor";
 import ReplaceOrCreateFloorModal from "./ReplaceOrCreateFloorModal";
 
 interface FloorReaderProps {
@@ -79,7 +79,9 @@ export default function FloorReader({
     cabinsCount: number;
     extractedZones: Zone[];
     extractedSeats: Seat[];
+    isEstimate?: boolean;
   } | null>(null);
+  const [extractionError, setExtractionError] = useState<string>("");
 
   // Replace vs Create New Floor Modal State
   const [isReplaceModalOpen, setIsReplaceModalOpen] = useState<boolean>(false);
@@ -97,6 +99,8 @@ export default function FloorReader({
 
     setFile(selectedFile);
     setFileName(selectedFile.name);
+    setExtractionError("");
+    setExtractedData(null);
 
     if (selectedFile.type.startsWith("image/")) {
       const url = URL.createObjectURL(selectedFile);
@@ -105,47 +109,144 @@ export default function FloorReader({
       setFilePreviewUrl(null);
     }
 
-    // Trigger AI Floor Recognition Pipeline
-    runAiAnalysis(selectedFile.name);
+    // Trigger AI Floor Recognition Pipeline — reads the ACTUAL uploaded file
+    runAiAnalysis(selectedFile);
   };
 
-  const runAiAnalysis = (name: string) => {
+  const runAiAnalysis = (uploadedFile: File) => {
+    const name = uploadedFile.name;
     setIsAnalyzing(true);
     setProgress(15);
-    setStage("OCR & Vector rasterization scanning Newmark Seating Floor PDF blueprint...");
 
-    setTimeout(() => {
-      setProgress(45);
-      setStage("Detecting structural boundaries: Cafeteria, Board Room, Reception, Executive Cabins (Tokyo, Dubai, Paris, New York)...");
+    const isPdf = uploadedFile.type === "application/pdf" || name.toLowerCase().endsWith(".pdf");
 
+    if (!isPdf) {
+      // Genuine visual/CAD parsing (images, DWG, SVG) isn't wired up in this
+      // build — rather than fake a result, say so plainly and point at a
+      // working alternative.
+      setStage("Checking file type...");
       setTimeout(() => {
-        setProgress(85);
-        setStage("Parsing workstation desk clusters (1 to 555) with exact x,y vector coordinates...");
+        setIsAnalyzing(false);
+        setProgress(0);
+        setExtractionError(
+          `"${name}" isn't a PDF. Real blueprint text extraction is only implemented for PDF files in this build — image (PNG/JPG), SVG, and DWG uploads aren't parsed yet (that needs a connected computer-vision service). Please upload a PDF version of this blueprint, or use "Bulk Seat Generator" / manual layout tools in Floor Designer instead.`
+        );
+      }, 500);
+      return;
+    }
+
+    setStage("Reading PDF text layer (seat numbers, room labels)...");
+
+    extractBlueprintFromPdf(uploadedFile)
+      .then((result) => {
+        setProgress(55);
+        setStage(`Found ${result.seatNumbers.length} seat number(s) and ${result.zoneLabels.length} labeled area type(s) across ${result.pageCount} page(s)...`);
+
+        if (result.seatNumbers.length === 0) {
+          setTimeout(() => {
+            setIsAnalyzing(false);
+            setProgress(0);
+            setExtractionError(
+              `No seat/desk numbers were found in "${name}"'s text layer. This usually means the PDF is a scanned image (no selectable text) rather than a vector/text-based export. Try re-exporting the blueprint as a text-based PDF, or use "Bulk Seat Generator" to lay out seats manually.`
+            );
+          }, 400);
+          return;
+        }
 
         setTimeout(() => {
-          setProgress(100);
-          setIsAnalyzing(false);
+          setProgress(85);
+          setStage("Building zones and seat layout from extracted data...");
 
-          // Generate complete Newmark Seating Floor blueprint data (555 seats, exact zones)
-          const blueprint = generateNewmarkBlueprintData("b1", "f1");
+          setTimeout(() => {
+            setProgress(100);
+            setIsAnalyzing(false);
 
-          setExtractedData({
-            zonesCount: blueprint.stats.totalZones,
-            seatsCount: blueprint.stats.totalSeats,
-            wallsCount: 42,
-            cabinsCount: blueprint.stats.totalCabins,
-            extractedZones: blueprint.zones,
-            extractedSeats: blueprint.seats
-          });
+            // Split the real, extracted seat numbers into zones. Prefer the
+            // number of "Cluster" labels actually found in the document; if
+            // none were labeled, fall back to a reasonable capacity-based
+            // split (roughly one zone per ~50 desks) so a 555-seat floor and
+            // a 40-seat floor don't get forced into the same zone count.
+            const clusterLabel = result.zoneLabels.find(z => z.label === "Cluster");
+            const zoneCount = clusterLabel && clusterLabel.count > 0
+              ? clusterLabel.count
+              : Math.max(1, Math.ceil(result.seatNumbers.length / 50));
 
-          onAddAuditLog(
-            "AI Floor Recognition",
-            "Floor Map",
-            `Parsed blueprint '${name}': Successfully extracted ${blueprint.stats.totalSeats} workstation seats (Desks 1 to 555) and ${blueprint.stats.totalZones} zones/cabins.`
-          );
-        }, 400);
-      }, 400);
-    }, 400);
+            const cabinLabel = result.zoneLabels.find(z => z.label === "Cabin");
+            const cabinsCount = cabinLabel?.count || 0;
+
+            // Wall/partition geometry genuinely can't be recovered from a
+            // text layer — this is a rough structural estimate, not a real
+            // count, and is labeled as such in the UI.
+            const estimatedWalls = zoneCount * 2 + cabinsCount;
+
+            const seatsPerZone = Math.ceil(result.seatNumbers.length / zoneCount);
+            const zoneWidth = 260;
+            const zoneHeight = Math.max(220, Math.ceil(seatsPerZone / 6) * 55 + 60);
+            const seatsPerRow = 6;
+
+            const extractedZones: Zone[] = [];
+            const extractedSeats: Seat[] = [];
+            const zoneColors = ["#2563eb", "#059669", "#7c3aed", "#d97706", "#e11d48", "#0891b2", "#65a30d", "#be185d"];
+
+            for (let z = 0; z < zoneCount; z++) {
+              const zoneId = `ai-zone-${Date.now()}-${z}`;
+              const zoneSeatNumbers = result.seatNumbers.slice(z * seatsPerZone, (z + 1) * seatsPerZone);
+              if (zoneSeatNumbers.length === 0) continue;
+
+              extractedZones.push({
+                id: zoneId,
+                name: clusterLabel ? `Cluster ${z + 1}` : `Zone ${String.fromCharCode(65 + (z % 26))}`,
+                floorId: "f1",
+                x: 40 + (z % 3) * (zoneWidth + 30),
+                y: 40 + Math.floor(z / 3) * (zoneHeight + 30),
+                width: zoneWidth,
+                height: zoneHeight,
+                color: zoneColors[z % zoneColors.length]
+              } as Zone);
+
+              zoneSeatNumbers.forEach((seatNum, i) => {
+                const row = Math.floor(i / seatsPerRow);
+                const col = i % seatsPerRow;
+                extractedSeats.push({
+                  id: `ai-seat-${Date.now()}-${z}-${i}`,
+                  seatNumber: seatNum,
+                  zoneId,
+                  floorId: "f1",
+                  buildingId: "b1",
+                  type: "Standard",
+                  status: "Vacant",
+                  x: 20 + col * 38,
+                  y: 20 + row * 38
+                } as Seat);
+              });
+            }
+
+            setExtractedData({
+              zonesCount: extractedZones.length,
+              seatsCount: extractedSeats.length,
+              wallsCount: estimatedWalls,
+              cabinsCount,
+              extractedZones,
+              extractedSeats,
+              isEstimate: true
+            });
+
+            onAddAuditLog(
+              "AI Floor Recognition",
+              "Floor Map",
+              `Parsed blueprint '${name}': extracted ${extractedSeats.length} real seat number(s) from the PDF text layer across ${extractedZones.length} zone(s) (${cabinsCount} cabin label(s) detected).`
+            );
+          }, 500);
+        }, 500);
+      })
+      .catch((err) => {
+        console.error("PDF extraction failed", err);
+        setIsAnalyzing(false);
+        setProgress(0);
+        setExtractionError(
+          `Couldn't read "${name}" as a PDF (${err?.message || "unknown error"}). Please confirm the file isn't corrupted or password-protected, or try "Bulk Seat Generator" instead.`
+        );
+      });
   };
 
   const handleOpenChoiceModal = () => {
@@ -228,17 +329,17 @@ export default function FloorReader({
           <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-slate-50 hover:bg-blue-50/20 rounded-2xl p-6 text-center relative transition-all">
             <input
               type="file"
-              accept=".png,.jpg,.jpeg,.svg,.pdf,.dwg,.dxf"
+              accept=".pdf,.png,.jpg,.jpeg,.svg,.dwg,.dxf"
               onChange={handleFileChange}
               disabled={!isAuthorized || isAnalyzing}
               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full disabled:cursor-not-allowed"
             />
             <FileUp className="mx-auto text-slate-400 mb-2" size={32} />
             <p className="text-xs font-bold text-slate-800">
-              Upload Blueprint (PDF, PNG, JPG, SVG, DWG)
+              Upload Blueprint PDF (real text extraction)
             </p>
             <p className="text-[10px] text-slate-400 mt-1">
-              Supports vector CAD layers & high-res architectural drawings
+              PNG/JPG/SVG/DWG accepted, but only PDF text-layer parsing is implemented — those formats need a connected vision AI service
             </p>
           </div>
 
@@ -248,6 +349,7 @@ export default function FloorReader({
               <span>Automated Workflow Protocol</span>
             </h5>
             <ul className="text-[10px] space-y-1 list-disc pl-3 text-slate-500">
+              <li>Reads real seat numbers & room labels from the PDF's text layer — results scale with the actual document, not a fixed count.</li>
               <li>Asks whether to <strong>Replace</strong> or <strong>Create New Floor</strong>.</li>
               <li>Auto-saves directly to Firestore & localStorage.</li>
               <li>Instantly reflects updates inside Floor Designer.</li>
@@ -307,7 +409,7 @@ export default function FloorReader({
                 </div>
 
                 <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl">
-                  <span className="text-[10px] font-bold text-purple-600 uppercase">Walls / Barriers</span>
+                  <span className="text-[10px] font-bold text-purple-600 uppercase">Walls / Barriers (Est.)</span>
                   <div className="text-lg font-extrabold text-purple-900 font-mono mt-0.5">{extractedData.wallsCount}</div>
                 </div>
 
@@ -316,6 +418,10 @@ export default function FloorReader({
                   <div className="text-lg font-extrabold text-amber-900 font-mono mt-0.5">{extractedData.cabinsCount}</div>
                 </div>
               </div>
+
+              <p className="text-[10px] text-slate-400 italic">
+                Zones and Seats reflect real numbers found in the PDF's text layer. Walls/Barriers is a rough structural estimate — true wall geometry needs visual/CAD parsing, which isn't connected in this build.
+              </p>
 
               {/* Visual preview box */}
               <div className="flex-1 bg-slate-900 rounded-2xl p-4 relative overflow-hidden border border-slate-800 min-h-[200px] flex items-center justify-center">
@@ -331,11 +437,23 @@ export default function FloorReader({
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-slate-400">
-              <Sparkles size={56} className="mx-auto mb-3 text-slate-300" />
-              <p className="text-xs font-bold text-slate-700">AI Floor Plan Importer Ready</p>
-              <p className="text-[11px] max-w-sm mt-1 leading-relaxed">
-                Upload an office blueprint file on the left. The system will prompt whether to replace or create a new floor, auto-save directly, and maintain a copy in AI Reader for immediate action.
-              </p>
+              {extractionError ? (
+                <>
+                  <ShieldAlert size={48} className="mx-auto mb-3 text-amber-400" />
+                  <p className="text-xs font-bold text-amber-700">Couldn't Extract This File</p>
+                  <p className="text-[11px] max-w-md mt-1.5 leading-relaxed text-slate-500">
+                    {extractionError}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Sparkles size={56} className="mx-auto mb-3 text-slate-300" />
+                  <p className="text-xs font-bold text-slate-700">AI Floor Plan Importer Ready</p>
+                  <p className="text-[11px] max-w-sm mt-1 leading-relaxed">
+                    Upload a text-based PDF blueprint on the left. The reader extracts real seat numbers and room labels from the document's text layer, then lets you replace or create a new floor from them.
+                  </p>
+                </>
+              )}
             </div>
           )}
         </div>

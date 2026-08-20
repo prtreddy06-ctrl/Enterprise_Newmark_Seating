@@ -144,19 +144,33 @@ export default function DashboardView({
 
   const cleanAllSeats = seats.filter(s => !isObsoleteSeat(s));
 
-  // Filter buildings, floors, zones, and seats by active site
+  // Filter buildings, floors, zones, and seats by active site.
+  // BUGFIX: this used to fall back to "show every floor/seat from every
+  // site" whenever the selected site had zero buildings tagged to it yet —
+  // which is exactly the case for any newly created site — so switching the
+  // Site dropdown silently kept showing the previous site's numbers instead
+  // of this site's real (empty) data. Now it filters strictly and shows a
+  // proper empty state below when a site genuinely has nothing set up yet.
   const siteBuildings = buildings.filter(b => b.siteId === activeSite.id || (!b.siteId && activeSite.id === "site-hyd"));
   const siteBuildingIds = new Set(siteBuildings.map(b => b.id));
 
-  const siteFloors = floors.filter(f => siteBuildingIds.size === 0 || siteBuildingIds.has(f.buildingId));
+  const siteFloors = floors.filter(f => siteBuildingIds.has(f.buildingId));
   const siteFloorIds = new Set(siteFloors.map(f => f.id));
 
-  const siteSeats = siteFloorIds.size > 0 ? cleanAllSeats.filter(s => siteFloorIds.has(s.floorId)) : cleanAllSeats;
-  const siteZones = siteFloorIds.size > 0 ? zones.filter(z => siteFloorIds.has(z.floorId)) : zones;
+  const siteSeats = cleanAllSeats.filter(s => siteFloorIds.has(s.floorId));
+  const siteZones = zones.filter(z => siteFloorIds.has(z.floorId));
 
   const regCampusCount = sites.length > 0 ? sites.length : 1;
   const regFloorsCount = siteFloors.length;
-  const regEmpCount = employees.length;
+  // Best-effort site scoping for headcount: EmployeeProfile doesn't carry a
+  // buildingId/floorId FK (only a display "floor" name string), so match
+  // against this site's floor names. Falls back to the full roster only if
+  // this site truly has no floors at all yet.
+  const siteFloorNames = new Set(siteFloors.map(f => f.name.toLowerCase().trim()));
+  const siteEmployees = siteFloors.length > 0
+    ? employees.filter(e => e.floor && siteFloorNames.has(e.floor.toLowerCase().trim()))
+    : employees;
+  const regEmpCount = siteEmployees.length;
 
   const dynamicBannerSubtitle = `Real-time spatial metrics for ${activeSite.name} across ${siteBuildings.length || 1} building(s), ${regFloorsCount} floor(s), and ${siteSeats.length} allocated desk seats.`;
 
@@ -628,7 +642,14 @@ export default function DashboardView({
               {mergedHeatmapZones.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-slate-400 space-y-2">
                   <Grid size={28} className="text-slate-300" />
-                  <p className="text-xs font-medium">No layout zones found for the selected floor filter.</p>
+                  <p className="text-xs font-medium">
+                    {siteBuildings.length === 0
+                      ? `No buildings or floors have been set up for "${activeSite.name}" yet.`
+                      : "No layout zones found for the selected floor filter."}
+                  </p>
+                  {siteBuildings.length === 0 && (
+                    <p className="text-[11px] text-slate-400">Add one from Floor Designer's "+ Building" tool.</p>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
