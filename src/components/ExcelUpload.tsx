@@ -16,7 +16,8 @@ import {
   ShieldAlert,
   Laptop,
   Building2,
-  Layers
+  Layers,
+  RotateCcw
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ITAsset, Seat, EmployeeProfile, AssetExcelImportResult, Floor, Building, Zone } from "../types";
@@ -110,6 +111,7 @@ interface SeatExcelImportResult {
   totalRows: number;
   successCount: number;
   failedCount: number;
+  duplicateInFileCount?: number;
   importedSeats: Seat[];
   errorReport: {
     rowNumber: number;
@@ -505,7 +507,7 @@ export default function ExcelUpload({
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
         
-        const jsonRows = XLSX.utils.sheet_to_json<any>(worksheet);
+        const jsonRows = XLSX.utils.sheet_to_json<any>(worksheet, { defval: "", raw: false });
 
         setProgress(70);
 
@@ -526,6 +528,7 @@ export default function ExcelUpload({
           const reports: SeatExcelImportResult["errorReport"] = [];
           let successCount = 0;
           let failedCount = 0;
+          let duplicateInFileCount = 0;
 
           jsonRows.forEach((row, idx) => {
             const rowNum = idx + 2;
@@ -577,31 +580,48 @@ export default function ExcelUpload({
 
             const isDeptVacant = dept.trim().toLowerCase() === "vacant" || statusVal.trim().toLowerCase() === "vacant";
 
-            if (!dept && !statusVal) {
-              failedCount++;
-              reports.push({
-                rowNumber: rowNum,
-                seatNumber: seatNum,
-                department: "N/A",
-                businessLead: leadName || "N/A",
-                reason: "Mandatory column 'Department' or 'Allocated Department' is missing or blank."
-              });
-              return;
-            }
-
+            // Only the Seat Number is truly mandatory. A row with no
+            // Department and no Status isn't invalid data — it just means
+            // "this seat exists, nothing allocated yet" (equivalent to
+            // Vacant), so every row with a real seat number now gets read
+            // and applied instead of being silently rejected.
             const cleanSeatNum = seatNum.toLowerCase().trim();
             const normClean = cleanSeatNum.replace(/^s[-_\s]*/i, "").replace(/^seat[-_\s]*/i, "").trim();
 
             const selectedFloorObj = floors.find(f => f.id === targetFloorId);
             const rowFloorVal = getFieldValue(row, ["Floor", "Floor Name", "Floor ID", "Building Floor"]);
+            const rowBuildingVal = getFieldValue(row, ["Building", "Building Name", "Building ID"]);
             let effectiveFloorId = targetFloorId;
             let effectiveBuildingId = selectedFloorObj?.buildingId || "b1";
 
             if (rowFloorVal && floors.length > 0) {
-              const matchedFl = floors.find(f => 
-                f.name.toLowerCase().includes(rowFloorVal.toLowerCase()) || 
-                f.id.toLowerCase() === rowFloorVal.toLowerCase()
+              const normalizedRowFloor = rowFloorVal.toLowerCase().trim();
+              // Our own template appends "(Building Name)" after the floor
+              // name — strip that back off before comparing so a value the
+              // app itself generated always matches exactly.
+              const rowFloorCore = normalizedRowFloor.replace(/\s*\([^)]*\)\s*$/, "").trim();
+
+              // Prefer an EXACT match (optionally narrowed by a Building
+              // column) over a fuzzy "includes" match, so e.g. "Floor 1"
+              // never accidentally matches "Floor 10" or vice versa.
+              const candidateFloors = rowBuildingVal
+                ? floors.filter(f => {
+                    const bld = buildings.find(b => b.id === f.buildingId);
+                    return bld && bld.name.toLowerCase().trim() === rowBuildingVal.toLowerCase().trim();
+                  })
+                : floors;
+              const searchIn = candidateFloors.length > 0 ? candidateFloors : floors;
+
+              const exactMatch = searchIn.find(f =>
+                f.name.toLowerCase().trim() === normalizedRowFloor ||
+                f.name.toLowerCase().trim() === rowFloorCore ||
+                f.id.toLowerCase() === normalizedRowFloor
               );
+              const fuzzyMatch = !exactMatch ? searchIn.find(f =>
+                f.name.toLowerCase().includes(normalizedRowFloor) || f.name.toLowerCase().includes(rowFloorCore)
+              ) : undefined;
+
+              const matchedFl = exactMatch || fuzzyMatch;
               if (matchedFl) {
                 effectiveFloorId = matchedFl.id;
                 effectiveBuildingId = matchedFl.buildingId;
@@ -736,10 +756,11 @@ export default function ExcelUpload({
             const existingIndex = successSeats.findIndex(s => s.id === updatedSeat.id);
             if (existingIndex !== -1) {
               successSeats[existingIndex] = updatedSeat;
+              duplicateInFileCount++;
             } else {
               successSeats.push(updatedSeat);
+              successCount++;
             }
-            successCount++;
           });
 
           setProgress(100);
@@ -749,6 +770,7 @@ export default function ExcelUpload({
             totalRows: jsonRows.length,
             successCount,
             failedCount,
+            duplicateInFileCount,
             importedSeats: successSeats,
             errorReport: reports
           });
@@ -1256,7 +1278,7 @@ export default function ExcelUpload({
               </div>
 
               {/* Counter Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
                   <span className="text-[10px] font-bold text-slate-400 uppercase">Total File Rows</span>
                   <div className="text-lg font-extrabold text-slate-800 font-mono mt-0.5">{seatImportResult.totalRows}</div>
@@ -1276,6 +1298,14 @@ export default function ExcelUpload({
                     <span>Invalid Rows</span>
                   </span>
                   <div className="text-lg font-extrabold text-rose-800 font-mono mt-0.5">{seatImportResult.failedCount}</div>
+                </div>
+
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                  <span className="text-[10px] font-bold text-amber-600 uppercase flex items-center gap-1">
+                    <RotateCcw size={12} />
+                    <span>Duplicates in File</span>
+                  </span>
+                  <div className="text-lg font-extrabold text-amber-800 font-mono mt-0.5">{seatImportResult.duplicateInFileCount || 0}</div>
                 </div>
               </div>
 
