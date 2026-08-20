@@ -51,7 +51,8 @@ import {
   ChevronDown,
   PanelLeftOpen,
   PanelLeftClose,
-  Ruler
+  Ruler,
+  RotateCcw
 } from "lucide-react";
 
 interface LayoutVersion {
@@ -427,7 +428,7 @@ export default function FloorMapDesigner({
 
   // In-App Delete Confirmation Modal State
   const [deleteConfirmData, setDeleteConfirmData] = useState<{
-    type: "seat" | "zone" | "object" | "group" | "building" | "floor";
+    type: "seat" | "zone" | "object" | "group" | "building" | "floor" | "clear-allocations" | "delete-all-seats";
     title: string;
     message: string;
     action: () => void;
@@ -1862,6 +1863,46 @@ export default function FloorMapDesigner({
     if (onAddAuditLog) onAddAuditLog("Bulk Delete Seats", "Zone/Seat", `Deleted ${count} seats`);
   };
 
+  // Clear every allocation on the CURRENT FLOOR back to Vacant — keeps the
+  // seats/desks themselves in place (position, zone, desk type) but wipes
+  // department, manager, and any employee/lock tied to them. This is the
+  // "undo an entire bulk upload's worth of assignments" action.
+  const executeClearAllAllocationsOnFloor = () => {
+    saveSnapshot();
+    const count = currentSeats.filter(s => s.status !== "Vacant" || s.department || s.allocatedDepartment).length;
+    const nextSeats = seats.map(s => (s.floorId === currentFloor?.id) ? {
+      ...s,
+      status: "Vacant" as const,
+      department: "",
+      allocatedDepartment: "",
+      allocatedManager: "",
+      managerName: "",
+      isFixedSlot: false,
+      employeeName: undefined,
+      employeeId: undefined,
+      employeeEmail: undefined
+    } : s);
+    onUpdateSeats(nextSeats);
+    updateLocalSeats(nextSeats);
+    setSelectedSeatIds([]);
+    setSelectedElement(null);
+    if (onAddAuditLog) onAddAuditLog("Clear All Allocations", "Zone/Seat", `Cleared allocation on ${count} seat(s) on floor "${currentFloor?.name}" back to Vacant.`);
+  };
+
+  // Delete every SEAT object on the current floor entirely (not just its
+  // allocation) — for starting a floor's seating layout completely fresh,
+  // e.g. before re-uploading a corrected bulk file.
+  const executeDeleteAllSeatsOnFloor = () => {
+    saveSnapshot();
+    const count = currentSeats.length;
+    const nextSeats = seats.filter(s => s.floorId !== currentFloor?.id);
+    onUpdateSeats(nextSeats);
+    updateLocalSeats(nextSeats);
+    setSelectedSeatIds([]);
+    setSelectedElement(null);
+    if (onAddAuditLog) onAddAuditLog("Delete All Seats On Floor", "Zone/Seat", `Deleted all ${count} seat(s) on floor "${currentFloor?.name}".`);
+  };
+
   const handleDeleteCurrentSelection = () => {
     if (!canModifyCanvas) {
       if (!canEditLayout) {
@@ -2561,6 +2602,35 @@ export default function FloorMapDesigner({
                         className="w-full px-3.5 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50 flex items-center gap-2.5 cursor-pointer text-left"
                       >
                         <Download size={14} className="text-teal-500" /><span>Download Excel Template</span>
+                      </button>
+                      <div className="my-1 border-t border-slate-100" />
+                      <button
+                        onClick={() => {
+                          setShowMoreToolsMenu(false);
+                          setDeleteConfirmData({
+                            type: "clear-allocations",
+                            title: "Clear All Allocations on This Floor?",
+                            message: `This resets every seat on "${currentFloor?.name}" back to Vacant — clearing department, manager, and employee assignments — but keeps the seats/desks themselves in place. Use this before re-uploading a corrected bulk file. This can't be undone except via Ctrl+Z immediately after.`,
+                            action: executeClearAllAllocationsOnFloor
+                          });
+                        }}
+                        className="w-full px-3.5 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <RotateCcw size={14} className="text-amber-500" /><span>Clear All Allocations (This Floor)</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowMoreToolsMenu(false);
+                          setDeleteConfirmData({
+                            type: "delete-all-seats",
+                            title: "Delete ALL Seats on This Floor?",
+                            message: `This permanently removes all ${currentSeats.length} seat(s) on "${currentFloor?.name}" from the map entirely — not just their allocations. Zones and layout objects are not affected. This can't be undone except via Ctrl+Z immediately after.`,
+                            action: executeDeleteAllSeatsOnFloor
+                          });
+                        }}
+                        className="w-full px-3.5 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 cursor-pointer text-left"
+                      >
+                        <Trash2 size={14} className="text-rose-500" /><span>Delete All Seats (This Floor)</span>
                       </button>
                       <div className="my-1 border-t border-slate-100" />
                       <button
