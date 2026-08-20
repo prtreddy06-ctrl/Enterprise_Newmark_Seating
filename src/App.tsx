@@ -654,8 +654,8 @@ export default function App() {
       const nextEmps = [...prev];
 
       seats.forEach(s => {
-        const empName = (s.employeeName || s.occupantName || "").trim();
-        const empEmail = (s.employeeEmail || s.occupantEmail || "").trim();
+        const empName = (s.employeeName || "").trim();
+        const empEmail = (s.employeeEmail || "").trim();
         if (empName || empEmail) {
           const emailKey = empEmail.toLowerCase();
           const nameKey = empName.toLowerCase();
@@ -1435,7 +1435,7 @@ export default function App() {
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
     setEmployees(prev => prev.map(e => {
       if (e.email.toLowerCase() === updatedUser.email.toLowerCase()) {
-        const updatedEmp = {
+        const updatedEmp: EmployeeProfile = {
           ...e,
           name: updatedUser.name,
           department: updatedUser.department || e.department,
@@ -1509,17 +1509,15 @@ export default function App() {
       setSeats(prev => {
         let changed = false;
         const updatedSeats = prev.map(s => {
-          const sName = (s.employeeName || s.occupantName || "").toLowerCase();
-          const sEmail = (s.employeeEmail || s.occupantEmail || "").toLowerCase();
+          const sName = (s.employeeName || "").toLowerCase();
+          const sEmail = (s.employeeEmail || "").toLowerCase();
           if (s.employeeId === empId || (empEmail && sEmail === empEmail) || (empName && sName === empName)) {
             changed = true;
             return {
               ...s,
-              status: "Available" as const,
+              status: "Vacant" as const,
               employeeName: "",
               employeeEmail: "",
-              occupantName: "",
-              occupantEmail: "",
               employeeId: "",
               allocatedDepartment: ""
             };
@@ -1589,17 +1587,15 @@ export default function App() {
     setSeats(prev => {
       let changed = false;
       const updatedSeats = prev.map(s => {
-        const sName = (s.employeeName || s.occupantName || "").toLowerCase();
-        const sEmail = (s.employeeEmail || s.occupantEmail || "").toLowerCase();
+        const sName = (s.employeeName || "").toLowerCase();
+        const sEmail = (s.employeeEmail || "").toLowerCase();
         if ((s.employeeId && empIds.includes(s.employeeId)) || (sEmail && targetEmails.includes(sEmail)) || (sName && targetNames.includes(sName))) {
           changed = true;
           return {
             ...s,
-            status: "Available" as const,
+            status: "Vacant" as const,
             employeeName: "",
             employeeEmail: "",
-            occupantName: "",
-            occupantEmail: "",
             employeeId: "",
             allocatedDepartment: ""
           };

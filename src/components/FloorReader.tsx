@@ -193,21 +193,25 @@ export default function FloorReader({
               const zoneSeatNumbers = result.seatNumbers.slice(z * seatsPerZone, (z + 1) * seatsPerZone);
               if (zoneSeatNumbers.length === 0) continue;
 
-              extractedZones.push({
+              const zoneName = clusterLabel ? `Cluster ${z + 1}` : `Zone ${String.fromCharCode(65 + (z % 26))}`;
+              const zone: Zone = {
                 id: zoneId,
-                name: clusterLabel ? `Cluster ${z + 1}` : `Zone ${String.fromCharCode(65 + (z % 26))}`,
+                name: zoneName,
                 floorId: "f1",
+                department: zoneName,
+                color: zoneColors[z % zoneColors.length],
                 x: 40 + (z % 3) * (zoneWidth + 30),
                 y: 40 + Math.floor(z / 3) * (zoneHeight + 30),
                 width: zoneWidth,
                 height: zoneHeight,
-                color: zoneColors[z % zoneColors.length]
-              } as Zone);
+                capacity: zoneSeatNumbers.length
+              };
+              extractedZones.push(zone);
 
               zoneSeatNumbers.forEach((seatNum, i) => {
                 const row = Math.floor(i / seatsPerRow);
                 const col = i % seatsPerRow;
-                extractedSeats.push({
+                const seat: Seat = {
                   id: `ai-seat-${Date.now()}-${z}-${i}`,
                   seatNumber: seatNum,
                   zoneId,
@@ -217,7 +221,8 @@ export default function FloorReader({
                   status: "Vacant",
                   x: 20 + col * 38,
                   y: 20 + row * 38
-                } as Seat);
+                };
+                extractedSeats.push(seat);
               });
             }
 

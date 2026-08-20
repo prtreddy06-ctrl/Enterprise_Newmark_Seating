@@ -128,6 +128,19 @@ export default function FloorMapDesigner({
   const canModifyCanvas = canEditLayout && isMapEditMode;
 
   const [selectedBuildingId, setSelectedBuildingId] = useState<string>("b1");
+
+  // Keep the selected building in sync with whichever campus/site is active
+  // globally (the header's SITE selector). Without this, switching sites
+  // could leave this dropdown pointing at a building from the PREVIOUS site
+  // that isn't even in the current site's filtered option list.
+  useEffect(() => {
+    const buildingsForActiveSite = buildings.filter(b => !b.siteId || b.siteId === activeSiteId);
+    const stillValid = buildingsForActiveSite.some(b => b.id === selectedBuildingId);
+    if (!stillValid && buildingsForActiveSite.length > 0) {
+      setSelectedBuildingId(buildingsForActiveSite[0].id);
+    }
+  }, [activeSiteId, buildings]);
+
   const [selectedFloorId, setSelectedFloorId] = useState<string>("f1");
 
   // Manager Selection Filter for Seat Highlighting
@@ -328,7 +341,7 @@ export default function FloorMapDesigner({
   };
 
   // New Building/Floor Form inputs
-  const [newCampusName, setNewCampusName] = useState<string>("North Tech Park");
+  const [newBuildingSiteId, setNewBuildingSiteId] = useState<string>("");
   const [newBuildingName, setNewBuildingName] = useState<string>("Building Delta");
   const [newBuildingLocation, setNewBuildingLocation] = useState<string>("Austin, TX");
   
@@ -2201,11 +2214,13 @@ export default function FloorMapDesigner({
   // Create Building / Campus Handler
   const handleCreateBuilding = () => {
     if (!newBuildingName.trim()) return;
+    const targetSiteId = newBuildingSiteId || activeSiteId;
     const newBld: Building = {
       id: `bld-${Date.now()}`,
       name: newBuildingName,
       location: newBuildingLocation,
-      floorsCount: 1
+      floorsCount: 1,
+      siteId: targetSiteId
     };
     if (onUpdateBuildings) onUpdateBuildings([...buildings, newBld]);
 
@@ -2213,6 +2228,7 @@ export default function FloorMapDesigner({
     const firstFloor: Floor = {
       id: `f-${Date.now()}`,
       buildingId: newBld.id,
+      siteId: targetSiteId,
       name: "Floor 1 (Main Hall)",
       capacity: 100,
       zonesCount: 1
@@ -2222,7 +2238,8 @@ export default function FloorMapDesigner({
     setSelectedBuildingId(newBld.id);
     setSelectedFloorId(firstFloor.id);
     setShowCreateBuildingModal(false);
-    if (onAddAuditLog) onAddAuditLog("Create Building", "Infrastructure", `Created new building "${newBuildingName}" at ${newBuildingLocation}`);
+    const siteName = sites.find(s => s.id === targetSiteId)?.name || targetSiteId;
+    if (onAddAuditLog) onAddAuditLog("Create Building", "Infrastructure", `Created new building "${newBuildingName}" at ${newBuildingLocation} under site "${siteName}"`);
   };
 
   // Create Floor Handler
@@ -2573,7 +2590,7 @@ export default function FloorMapDesigner({
                     <div className="fixed inset-0 z-40" onClick={() => setShowMoreToolsMenu(false)} />
                     <div className="absolute top-full left-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5 max-h-[70vh] overflow-y-auto">
                       <button
-                        onClick={() => { setShowMoreToolsMenu(false); if (!isMapEditMode) setIsMapEditMode(true); setShowCreateBuildingModal(true); }}
+                        onClick={() => { setShowMoreToolsMenu(false); if (!isMapEditMode) setIsMapEditMode(true); setNewBuildingSiteId(activeSiteId); setShowCreateBuildingModal(true); }}
                         className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer text-left"
                       >
                         <Building2 size={14} className="text-slate-500" /><span>+ Building</span>
@@ -2751,7 +2768,7 @@ export default function FloorMapDesigner({
                 onChange={(e) => setSelectedBuildingId(e.target.value)}
                 className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
               >
-                {buildings.map(b => (
+                {buildings.filter(b => !b.siteId || b.siteId === activeSiteId).map(b => (
                   <option key={b.id} value={b.id}>{b.name} ({b.location})</option>
                 ))}
               </select>
@@ -2995,7 +3012,7 @@ export default function FloorMapDesigner({
                   </div>
 
                   {/* Confirmation Status Banner */}
-                  {(activeZoneData.department.includes("Unassigned") || activeZoneData.isConfirmed === false) ? (
+                  {((activeZoneData.department || "").includes("Unassigned") || activeZoneData.isConfirmed === false) ? (
                     <div className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-lg text-xs space-y-2 shadow-2xs">
                       <div className="flex items-center gap-1.5 font-bold text-amber-800">
                         <AlertTriangle size={14} className="text-amber-600 shrink-0" />
@@ -4971,13 +4988,18 @@ export default function FloorMapDesigner({
 
             <div className="space-y-4 text-xs">
               <div className="space-y-1">
-                <label className="font-bold text-slate-700">Campus Name</label>
-                <input 
-                  type="text" 
-                  value={newCampusName} 
-                  onChange={(e) => setNewCampusName(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
-                />
+                <label className="font-bold text-slate-700">Campus / Site</label>
+                <select
+                  value={newBuildingSiteId}
+                  onChange={(e) => setNewBuildingSiteId(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold bg-white"
+                >
+                  {sites.length === 0 && <option value="">No sites yet — will use default</option>}
+                  {sites.map(s => (
+                    <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-400">This building belongs to whichever campus/city you pick here — add more buildings under the same site for multiple towers in one city.</p>
               </div>
 
               <div className="space-y-1">
