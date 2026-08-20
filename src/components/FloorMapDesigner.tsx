@@ -2767,6 +2767,7 @@ export default function FloorMapDesigner({
                 value={selectedBuildingId} 
                 onChange={(e) => setSelectedBuildingId(e.target.value)}
                 className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                style={{ color: "#1e293b" }}
               >
                 {buildings.filter(b => !b.siteId || b.siteId === activeSiteId).map(b => (
                   <option key={b.id} value={b.id}>{b.name} ({b.location})</option>
@@ -2808,6 +2809,7 @@ export default function FloorMapDesigner({
                 value={selectedFloorId} 
                 onChange={(e) => setSelectedFloorId(e.target.value)}
                 className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                style={{ color: "#1e293b" }}
               >
                 {currentFloors.map(f => (
                   <option key={f.id} value={f.id}>{f.name} (Capacity: {f.capacity})</option>
@@ -3356,7 +3358,8 @@ export default function FloorMapDesigner({
                         const updated = seats.map(s => s.id === activeSeatData.id ? { ...s, type: e.target.value as any } : s);
                         onUpdateSeats(updated);
                       }}
-                      className="w-full bg-white border border-slate-200 p-1.5 rounded-md text-xs font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                      className="w-full bg-white border border-slate-200 p-1.5 rounded-md text-xs font-medium text-slate-700 disabled:bg-slate-50 disabled:text-slate-500"
+                      style={{ color: "#334155" }}
                     >
                       <option value="Standard">Standard</option>
                       <option value="Hot Desk">Hot Desk</option>
@@ -3376,7 +3379,8 @@ export default function FloorMapDesigner({
                         const updated = seats.map(s => s.id === activeSeatData.id ? { ...s, status: e.target.value as any } : s);
                         onUpdateSeats(updated);
                       }}
-                      className="w-full bg-white border border-slate-200 p-1.5 rounded-md text-xs font-medium disabled:bg-slate-50 disabled:text-slate-500"
+                      className="w-full bg-white border border-slate-200 p-1.5 rounded-md text-xs font-medium text-slate-700 disabled:bg-slate-50 disabled:text-slate-500"
+                      style={{ color: "#334155" }}
                     >
                       <option value="Vacant">Vacant</option>
                       <option value="Occupied">Occupied</option>
@@ -4992,7 +4996,8 @@ export default function FloorMapDesigner({
                 <select
                   value={newBuildingSiteId}
                   onChange={(e) => setNewBuildingSiteId(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold bg-white"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold bg-white text-slate-800"
+                  style={{ color: "#1e293b", backgroundColor: "#ffffff" }}
                 >
                   {sites.length === 0 && <option value="">No sites yet — will use default</option>}
                   {sites.map(s => (
@@ -5008,7 +5013,8 @@ export default function FloorMapDesigner({
                   type="text" 
                   value={newBuildingName} 
                   onChange={(e) => setNewBuildingName(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-800 bg-white"
+                  style={{ color: "#1e293b", backgroundColor: "#ffffff" }}
                 />
               </div>
 
@@ -5018,7 +5024,8 @@ export default function FloorMapDesigner({
                   type="text" 
                   value={newBuildingLocation} 
                   onChange={(e) => setNewBuildingLocation(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-800 bg-white"
+                  style={{ color: "#1e293b", backgroundColor: "#ffffff" }}
                 />
               </div>
             </div>
@@ -5060,7 +5067,7 @@ export default function FloorMapDesigner({
                   type="text" 
                   value={newFloorName} 
                   onChange={(e) => setNewFloorName(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-800 bg-white"
                 />
               </div>
 
@@ -5070,7 +5077,7 @@ export default function FloorMapDesigner({
                   type="number" 
                   value={newFloorCapacity} 
                   onChange={(e) => setNewFloorCapacity(parseInt(e.target.value) || 100)}
-                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-mono font-bold"
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs font-mono font-bold text-slate-800 bg-white"
                 />
               </div>
             </div>

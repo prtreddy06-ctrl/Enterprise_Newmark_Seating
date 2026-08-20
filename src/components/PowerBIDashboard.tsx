@@ -35,6 +35,7 @@ import {
   Armchair
 } from "lucide-react";
 import { Seat, ITAsset, EmployeeProfile, Building, Floor, Zone, SeatRequest, CheckInLog, AuditLog } from "../types";
+import { isFacilityLabel } from "../utils/departmentFilters";
 
 interface PowerBIDashboardProps {
   seats?: Seat[];
@@ -140,6 +141,10 @@ export default function PowerBIDashboard({
   const rejectedRequestsCount = requests.filter(r => r.status === "Rejected").length;
 
   // Unique Departments
+  // Facility/room labels (Executive Cabins, Conference Rooms, etc.) are
+  // excluded from department-wise breakdowns and reported separately as
+  // facility/room counts instead — see utils/departmentFilters.ts.
+
   const availableDepartments = useMemo(() => {
     const set = new Set<string>();
     zones.forEach(z => { if (z.department) set.add(z.department); });
@@ -150,7 +155,7 @@ export default function PowerBIDashboard({
     employees.forEach(e => { if (e.department) set.add(e.department); });
     
     const list = Array.from(set).filter(d => 
-      d && typeof d === "string" && d.toLowerCase() !== "vacant" && d.toLowerCase() !== "n/a"
+      d && typeof d === "string" && d.toLowerCase() !== "vacant" && d.toLowerCase() !== "n/a" && !isFacilityLabel(d)
     );
 
     // Sort same base departments together alphabetically (e.g. India HR COE before India HR COE - Future Expansion)
@@ -161,6 +166,21 @@ export default function PowerBIDashboard({
     }
     return list;
   }, [zones, seats, employees]);
+
+  // Real, physical facility/room counts (cabins, conference rooms, etc.) —
+  // shown as their own metric instead of being mislabeled as departments.
+  const facilityRoomCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    zones.forEach(z => {
+      if (z.department && isFacilityLabel(z.department)) {
+        const label = z.department.trim();
+        counts.set(label, (counts.get(label) || 0) + 1);
+      }
+    });
+    return Array.from(counts.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [zones]);
 
   // Zone Density Analytics - Aggregated & Merged by Zone Name
   const zoneDensityData = useMemo(() => {
@@ -495,11 +515,66 @@ export default function PowerBIDashboard({
       ["Pending Allocation Requests", String(pendingRequestsCount)]
     ];
     kpiSlide.addTable(kpiRows as any, {
-      x: 0.4, y: 1.0, w: 9, colW: [6, 3],
-      fontSize: 12, border: { type: "solid", color: "E2E8F0", pt: 1 },
+      x: 0.4, y: 1.0, w: 4.3, colW: [2.8, 1.5],
+      fontSize: 11, border: { type: "solid", color: "E2E8F0", pt: 1 },
       fill: { color: "F8FAFC" },
       color: "334155"
     });
+
+    // Real occupancy donut chart, sitting alongside the KPI table
+    kpiSlide.addChart(
+      pptx.ChartType.doughnut,
+      [{
+        name: "Occupancy Split",
+        labels: ["Occupied", "Vacant", "Reserved"],
+        values: [occupiedSeatsCount, vacantSeatsCount, reservedSeatsCount]
+      }],
+      {
+        x: 5.1, y: 1.0, w: 4.3, h: 3.6,
+        chartColors: ["DC2626", "059669", "D97706"],
+        showLegend: true, legendPos: "b", legendFontSize: 10,
+        showValue: true, dataLabelFontSize: 10, dataLabelColor: "FFFFFF",
+        title: "Occupancy Split", showTitle: true, titleFontSize: 12
+      }
+    );
+
+    // Department bar chart slide — uses the SAME facility-excluded, real
+    // department data as the on-screen Department Matrix, so a report can't
+    // show "Executive Cabins" or "Conference Rooms" as if they were
+    // departments with staff.
+    if (departmentAllocationDataFiltered.length > 0) {
+      const deptSlide = pptx.addSlide();
+      deptSlide.addText("Department Seat Allocation", { x: 0.4, y: 0.3, w: 9, h: 0.5, fontSize: 20, bold: true, color: "1E293B" });
+      const topDepts = departmentAllocationDataFiltered.slice(0, 12);
+      deptSlide.addChart(
+        pptx.ChartType.bar,
+        [
+          { name: "Occupied", labels: topDepts.map(d => d.department), values: topDepts.map(d => d.occupiedSeats) },
+          { name: "Vacant", labels: topDepts.map(d => d.department), values: topDepts.map(d => d.vacantSeats) }
+        ],
+        {
+          x: 0.4, y: 1.0, w: 9.2, h: 4.3,
+          barDir: "col", barGrouping: "stacked",
+          chartColors: ["2563EB", "94A3B8"],
+          showLegend: true, legendPos: "b", legendFontSize: 10,
+          catAxisLabelFontSize: 8, valAxisLabelFontSize: 9,
+          showValue: false
+        }
+      );
+    }
+
+    // Facility & special areas — reported as room counts, never as departments
+    if (facilityRoomCounts.length > 0) {
+      const facSlide = pptx.addSlide();
+      facSlide.addText("Facility & Special Areas", { x: 0.4, y: 0.3, w: 9, h: 0.5, fontSize: 20, bold: true, color: "1E293B" });
+      facSlide.addText("Rooms and shared spaces — not employee departments.", { x: 0.4, y: 0.75, w: 9, h: 0.35, fontSize: 11, color: "64748B", italic: true });
+      const facRows = [["Facility / Area", "Count"], ...facilityRoomCounts.map(f => [f.label, String(f.count)])];
+      facSlide.addTable(facRows as any, {
+        x: 0.4, y: 1.2, w: 6, colW: [4.5, 1.5],
+        fontSize: 12, border: { type: "solid", color: "E2E8F0", pt: 1 },
+        fill: { color: "F8FAFC" }, color: "334155"
+      });
+    }
 
     // Seat allocation matrix slide(s) — chunked so no slide overflows
     const chunkSize = 18;
@@ -547,6 +622,48 @@ export default function PowerBIDashboard({
       </tr>`;
     }).join("\n");
 
+    // --- Real inline SVG donut chart for Occupied/Vacant/Reserved split ---
+    const donutTotal = Math.max(1, occupiedSeatsCount + vacantSeatsCount + reservedSeatsCount);
+    const donutSegments = [
+      { label: "Occupied", value: occupiedSeatsCount, color: "#dc2626" },
+      { label: "Vacant", value: vacantSeatsCount, color: "#059669" },
+      { label: "Reserved", value: reservedSeatsCount, color: "#d97706" }
+    ];
+    const radius = 70, circumference = 2 * Math.PI * radius;
+    let cumulativeOffset = 0;
+    const donutArcsHtml = donutSegments.map(seg => {
+      const fraction = seg.value / donutTotal;
+      const dash = fraction * circumference;
+      const circle = `<circle cx="90" cy="90" r="${radius}" fill="none" stroke="${seg.color}" stroke-width="28"
+        stroke-dasharray="${dash} ${circumference - dash}" stroke-dashoffset="${-cumulativeOffset}" transform="rotate(-90 90 90)" />`;
+      cumulativeOffset += dash;
+      return circle;
+    }).join("\n");
+    const donutLegendHtml = donutSegments.map(seg =>
+      `<div class="legend-item"><span class="swatch" style="background:${seg.color}"></span>${seg.label}: <strong>${seg.value}</strong></div>`
+    ).join("");
+
+    // --- Real inline SVG bar chart for department-wise seat allocation ---
+    const topDepts = departmentAllocationDataFiltered.slice(0, 10);
+    const maxDeptSeats = Math.max(1, ...topDepts.map(d => d.totalSeats));
+    const barChartWidth = 640, barHeight = 22, barGap = 12;
+    const barsHtml = topDepts.map((d, i) => {
+      const occW = (d.occupiedSeats / maxDeptSeats) * (barChartWidth - 160);
+      const vacW = (d.vacantSeats / maxDeptSeats) * (barChartWidth - 160);
+      const y = i * (barHeight + barGap);
+      return `
+        <text x="0" y="${y + barHeight - 6}" font-size="11" fill="#334155">${d.department.length > 22 ? d.department.slice(0, 22) + "…" : d.department}</text>
+        <rect x="160" y="${y}" width="${occW}" height="${barHeight}" fill="#2563eb" rx="3"/>
+        <rect x="${160 + occW}" y="${y}" width="${vacW}" height="${barHeight}" fill="#cbd5e1" rx="3"/>
+        <text x="${160 + occW + vacW + 6}" y="${y + barHeight - 6}" font-size="10" fill="#64748b">${d.totalSeats}</text>
+      `;
+    }).join("\n");
+    const barChartHeight = Math.max(60, topDepts.length * (barHeight + barGap));
+
+    const facilityRowsHtml = facilityRoomCounts.map(f =>
+      `<div class="kpi-card"><div class="label">${f.label}</div><div class="value">${f.count}</div></div>`
+    ).join("");
+
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -561,6 +678,14 @@ export default function PowerBIDashboard({
   .kpi-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
   .kpi-card .label { font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: bold; letter-spacing: 0.03em; }
   .kpi-card .value { font-size: 24px; font-weight: bold; margin-top: 4px; }
+  .charts-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 20px; margin-bottom: 28px; }
+  .chart-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; }
+  .chart-card h3 { margin: 0 0 16px; font-size: 13px; color: #1e293b; }
+  .donut-wrap { display: flex; align-items: center; gap: 20px; }
+  .legend-item { font-size: 12px; color: #334155; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .section-title { font-size: 13px; font-weight: bold; color: #1e293b; margin: 28px 0 12px; }
+  .section-note { font-size: 11px; color: #94a3b8; font-style: italic; margin: -8px 0 16px; }
   table { width: 100%; border-collapse: collapse; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
   th, td { text-align: left; padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
   th { background: #f1f5f9; text-transform: uppercase; font-size: 10px; color: #64748b; letter-spacing: 0.03em; }
@@ -585,6 +710,30 @@ export default function PowerBIDashboard({
     <div class="kpi-card"><div class="label">Asset Linking Compliance</div><div class="value">${assetLinkingRate}%</div></div>
     <div class="kpi-card"><div class="label">Pending Requests</div><div class="value">${pendingRequestsCount}</div></div>
   </div>
+
+  <div class="charts-grid">
+    <div class="chart-card">
+      <h3>Occupancy Split</h3>
+      <div class="donut-wrap">
+        <svg width="180" height="180" viewBox="0 0 180 180">${donutArcsHtml}</svg>
+        <div>${donutLegendHtml}</div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <h3>Department Seat Allocation (Top ${topDepts.length})</h3>
+      ${topDepts.length > 0
+        ? `<svg width="100%" height="${barChartHeight}" viewBox="0 0 ${barChartWidth} ${barChartHeight}">${barsHtml}</svg>`
+        : `<p style="font-size:12px;color:#94a3b8;">No department data with real seat allocations found.</p>`}
+    </div>
+  </div>
+
+  ${facilityRoomCounts.length > 0 ? `
+  <div class="section-title">Facility & Special Areas</div>
+  <div class="section-note">Rooms and shared spaces — not employee departments.</div>
+  <div class="kpi-grid">${facilityRowsHtml}</div>
+  ` : ""}
+
+  <div class="section-title">Seat Allocation Matrix</div>
   <table>
     <thead><tr><th>Seat</th><th>Zone</th><th>Status</th><th>Type</th><th>Employee</th><th>Department</th></tr></thead>
     <tbody>
@@ -1349,6 +1498,23 @@ export default function PowerBIDashboard({
       {/* PAGE 2: DEPARTMENT MATRIX */}
       {activePage === "departments" && (
         <div className="space-y-6">
+          {facilityRoomCounts.length > 0 && (
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Facility & Special Areas</span>
+                <h5 className="font-bold text-slate-900 text-sm">Rooms & Facilities (not departments)</h5>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {facilityRoomCounts.map(f => (
+                  <div key={f.label} className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block truncate" title={f.label}>{f.label}</span>
+                    <span className="text-lg font-extrabold text-slate-800 font-mono">{f.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
@@ -1371,7 +1537,7 @@ export default function PowerBIDashboard({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {departmentAllocationData.map(d => (
+                  {departmentAllocationDataFiltered.map(d => (
                     <tr key={d.department} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-3 font-bold text-slate-900">{d.department}</td>
                       <td className="p-3 font-mono font-medium">{d.totalSeats} seats</td>

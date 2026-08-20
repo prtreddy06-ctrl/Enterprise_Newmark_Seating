@@ -140,9 +140,9 @@ export default function Header({
   };
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-8 shrink-0 z-30 shadow-xs relative" id="app-global-header">
+    <header className="min-h-16 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 sm:px-8 py-2.5 shrink-0 z-30 shadow-xs relative" id="app-global-header">
       {/* LEFT TITLE SECTION */}
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-3 shrink-0 flex-wrap gap-y-1.5">
         {onToggleSidebar && (
           <button
             onClick={onToggleSidebar}
@@ -160,13 +160,13 @@ export default function Header({
         {/* LOCATION SITE ENVIRONMENT SELECTOR */}
         {sites && sites.length > 0 && (
           <>
-            <div className="hidden sm:flex items-center gap-1.5 bg-slate-100/80 border border-slate-200/80 rounded-xl px-2.5 py-1 text-xs">
+            <div className="hidden sm:flex items-center gap-1.5 bg-slate-100/80 border border-slate-200/80 rounded-xl px-2.5 py-1 text-xs shrink-0">
               <Globe size={13} className="text-blue-600 shrink-0" />
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Site:</span>
               <select
                 value={activeSiteId}
                 onChange={(e) => onSelectSite && onSelectSite(e.target.value)}
-                className="bg-transparent border-none text-xs font-bold text-slate-800 focus:outline-none cursor-pointer pr-1"
+                className="bg-transparent border-none text-xs font-bold text-slate-800 focus:outline-none cursor-pointer pr-1 max-w-[170px] truncate"
                 title="Switch active location site environment"
               >
                 {sites.map((s) => (
@@ -196,18 +196,18 @@ export default function Header({
       </div>
 
       {/* DYNAMIC ROLE SWITCHER & PROFILE */}
-      <div className="flex items-center gap-3 sm:gap-4">
+      <div className="flex items-center flex-wrap gap-y-2 gap-3 sm:gap-4 shrink-0 ml-auto">
         {/* Mobile App Downloads Trigger */}
         <button 
           onClick={() => setShowDownloadsModal(true)}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+          className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
         >
           <Smartphone size={14} className="text-blue-600" />
           <span className="hidden sm:inline">Mobile Downloads</span>
         </button>
 
         {/* Role Switcher & Fixed Role Banner Status */}
-        <div className="flex items-center gap-1.5" id="header-role-panel">
+        <div className="flex items-center gap-1.5 shrink-0" id="header-role-panel">
           {currentUser?.role === UserRole.SUPER_USER ? (
             <div className="flex items-center gap-1.5 bg-purple-50 border border-purple-200 rounded-xl px-2.5 py-1">
               <Sparkles size={13} className="text-purple-600 shrink-0" />
@@ -235,7 +235,7 @@ export default function Header({
         </div>
 
         {/* Action icons */}
-        <div className="flex items-center gap-2 sm:gap-3" id="header-action-icons">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0" id="header-action-icons">
           {/* AES-256 ENCRYPTION STATUS BUTTON */}
           <button
             onClick={onOpenEncryptionModal}

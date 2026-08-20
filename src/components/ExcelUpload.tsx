@@ -112,6 +112,7 @@ interface SeatExcelImportResult {
   successCount: number;
   failedCount: number;
   duplicateInFileCount?: number;
+  floorMismatchCount?: number;
   importedSeats: Seat[];
   errorReport: {
     rowNumber: number;
@@ -529,6 +530,7 @@ export default function ExcelUpload({
           let successCount = 0;
           let failedCount = 0;
           let duplicateInFileCount = 0;
+          let floorMismatchCount = 0;
 
           jsonRows.forEach((row, idx) => {
             const rowNum = idx + 2;
@@ -600,6 +602,11 @@ export default function ExcelUpload({
               // name — strip that back off before comparing so a value the
               // app itself generated always matches exactly.
               const rowFloorCore = normalizedRowFloor.replace(/\s*\([^)]*\)\s*$/, "").trim();
+              // Loosest tier: strip ALL punctuation/spacing so trivial
+              // formatting differences (extra space, dash vs none, etc.)
+              // still match — this only kicks in if the above two don't.
+              const looseNormalize = (s: string) => s.replace(/[^a-z0-9]/gi, "").toLowerCase();
+              const rowFloorLoose = looseNormalize(rowFloorCore);
 
               // Prefer an EXACT match (optionally narrowed by a Building
               // column) over a fuzzy "includes" match, so e.g. "Floor 1"
@@ -620,11 +627,16 @@ export default function ExcelUpload({
               const fuzzyMatch = !exactMatch ? searchIn.find(f =>
                 f.name.toLowerCase().includes(normalizedRowFloor) || f.name.toLowerCase().includes(rowFloorCore)
               ) : undefined;
+              const looseMatch = (!exactMatch && !fuzzyMatch) ? searchIn.find(f =>
+                looseNormalize(f.name) === rowFloorLoose
+              ) : undefined;
 
-              const matchedFl = exactMatch || fuzzyMatch;
+              const matchedFl = exactMatch || fuzzyMatch || looseMatch;
               if (matchedFl) {
                 effectiveFloorId = matchedFl.id;
                 effectiveBuildingId = matchedFl.buildingId;
+              } else {
+                floorMismatchCount++;
               }
             }
 
@@ -771,6 +783,7 @@ export default function ExcelUpload({
             successCount,
             failedCount,
             duplicateInFileCount,
+            floorMismatchCount,
             importedSeats: successSeats,
             errorReport: reports
           });
@@ -952,7 +965,8 @@ export default function ExcelUpload({
       `Committed ${seatImportResult.importedSeats.length} department seat allocations to central system.`
     );
 
-    alert(`Success: Successfully allocated ${seatImportResult.importedSeats.length} seats to departments!`);
+    const destFloorName = floors.find(f => f.id === targetFloorId)?.name || "the selected floor";
+    alert(`Success: Allocated ${seatImportResult.importedSeats.length} seats to "${destFloorName}". Open Floor Designer and select this floor to see them.`);
     setSeatImportResult(null);
     setFileName("");
   };
@@ -1276,6 +1290,27 @@ export default function ExcelUpload({
                   </button>
                 </div>
               </div>
+
+              {/* Destination confirmation — makes it explicit exactly where these seats will land */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2.5">
+                <Layers size={15} className="text-blue-600 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-blue-900 leading-relaxed">
+                  <strong>Committing will apply these seats to:</strong>{" "}
+                  {buildings.find(b => b.id === (floors.find(f => f.id === targetFloorId)?.buildingId))?.name || "Unknown Building"}
+                  {" → "}
+                  {floors.find(f => f.id === targetFloorId)?.name || "Unknown Floor"}.
+                  {" "}If that's not the floor you expect, change "Target Floor Destination" on the left before committing.
+                </div>
+              </div>
+
+              {(seatImportResult.floorMismatchCount || 0) > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5">
+                  <ShieldAlert size={15} className="text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-[11px] text-amber-900 leading-relaxed">
+                    <strong>{seatImportResult.floorMismatchCount} row(s)</strong> had a Floor value that didn't match any floor in this workspace — those seats were still imported, but into the Target Floor Destination above rather than whatever floor name was in the file. Check the Floor column in your file if that's unexpected.
+                  </div>
+                </div>
+              )}
 
               {/* Counter Cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

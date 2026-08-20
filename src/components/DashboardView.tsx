@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Seat, Zone, SeatRequest, ITAsset, Building, Floor, EmployeeProfile, UserRole, LocationSite, CheckInLog } from "../types";
 import { downloadMobileAPK, downloadMobileIPA } from "../utils/emailAndDownloadService";
+import { isFacilityLabel } from "../utils/departmentFilters";
 import AppDownloadModal from "./AppDownloadModal";
 import { 
   Users, 
@@ -317,7 +318,7 @@ export default function DashboardView({
     .map(z => z.department).filter(Boolean);
 
   const rawDepartments = Array.from(new Set([...seatDepts, ...zoneDepts]))
-    .filter(d => d && typeof d === "string" && d.toLowerCase() !== "vacant" && d.toLowerCase() !== "n/a");
+    .filter(d => d && typeof d === "string" && d.toLowerCase() !== "vacant" && d.toLowerCase() !== "n/a" && !isFacilityLabel(d));
 
   // Sort same base departments together alphabetically (e.g. India - Graphics & Marketing before India - Graphics & Marketing- Future Expansion)
   rawDepartments.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
